@@ -1,10 +1,11 @@
 import { Container, Graphics } from 'pixi.js'
 import { ROAD_WIDTH } from '../road.js'
 import { bush } from '../scenery.js'
+import { stageAt } from '../threat.js'
 import { addProp, maybeAddChest } from '../loot.js'
 import { rand, randInt, roadFrame, sideThatFits, drawClearing, campfire, drawLog } from './helpers.js'
 
-function drawLeanTo(g, x, y, facing) {
+export function drawLeanTo(g, x, y, facing) {
   const c = Math.cos(facing)
   const s = Math.sin(facing)
   const pt = (fx, fy) => [x + fx * c - fy * s, y + fx * s + fy * c]
@@ -16,7 +17,7 @@ function drawLeanTo(g, x, y, facing) {
   g.circle(...pt(-6, 8), 5).fill('#7d4a3a')
 }
 
-function drawWatchtower(g, x, y) {
+export function drawWatchtower(g, x, y) {
   g.rect(x - 13, y - 9, 34, 34).fill({ color: '#000', alpha: 0.25 })
   g.rect(x - 17, y - 17, 34, 34).fill('#6e4a28')
   for (let k = -12; k <= 12; k += 8) g.moveTo(x - 17, y + k).lineTo(x + 17, y + k)
@@ -27,7 +28,7 @@ function drawWatchtower(g, x, y) {
 
 // Bandit camp: canvas lean-tos round a fire, stolen loot piled up, and a
 // watchtower by the road whose lookout raises the alarm from far off.
-export function banditCamp({ layer, road, i, difficulty, enemies }) {
+export function banditCamp({ layer, road, i, difficulty, extra, enemies }) {
   const offset = ROAD_WIDTH / 2 + 150
   const side = sideThatFits(road, i, offset)
   if (!side) return null
@@ -72,7 +73,7 @@ export function banditCamp({ layer, road, i, difficulty, enemies }) {
   layer.addChild(view)
 
   const members = [enemies.add('bandit', twx, twy, { x: twx, y: twy, facing: Math.atan2(cy - twy, cx - twx) + Math.PI })]
-  const sitting = Math.min(5, 2 + Math.floor(difficulty))
+  const sitting = Math.min(5 + extra, 2 + Math.floor(difficulty))
   for (let k = 0; k < sitting; k++) {
     const a = rand(0, Math.PI * 2)
     const x = cx + Math.cos(a) * 32
@@ -97,7 +98,7 @@ export function banditCamp({ layer, road, i, difficulty, enemies }) {
 
 // Bandit roadblock: a spiked log barricade right across the road. Getting
 // round it means leaving the road for the mud while the bandits pile in.
-export function banditRoadblock({ layer, road, i, difficulty, enemies }) {
+export function banditRoadblock({ layer, road, i, difficulty, extra, enemies }) {
   const { at, d } = roadFrame(road, i)
   const half = ROAD_WIDTH / 2 + 36
 
@@ -139,7 +140,10 @@ export function banditRoadblock({ layer, road, i, difficulty, enemies }) {
     [rand(30, 60), rand(-40, 40)],
     [rand(50, 80), -(half + rand(10, 30))],
   ]
-  const members = posts.slice(0, Math.min(5, 2 + Math.floor(difficulty))).map(([along, lateral]) => {
+  const count = Math.min(5 + extra, 2 + Math.floor(difficulty))
+  // Any more than that wait further back up the road
+  while (posts.length < count) posts.push([rand(60, 120), rand(-half - 30, half + 30)])
+  const members = posts.slice(0, count).map(([along, lateral]) => {
     const [x, y] = at(along, lateral)
     return enemies.add('bandit', x, y, { x, y, facing })
   })
@@ -159,18 +163,18 @@ export function banditRoadblock({ layer, road, i, difficulty, enemies }) {
 // Bandit ambush: bandits crouched in thick roadside bushes. Watch for the
 // tells: hoods peeking out, a glint of steel, trampled grass and rustling.
 // A stone into a bush will flush them out early.
-export function banditAmbush({ layer, road, i, difficulty, enemies }) {
+export function banditAmbush({ layer, road, i, difficulty, extra, enemies }) {
   const { at, n } = roadFrame(road, i)
   const view = new Container()
   const ground = new Graphics()
   view.addChild(ground)
   const spots = []
   const members = []
-  const count = Math.min(5, 2 + Math.floor(difficulty))
+  const count = Math.min(5 + extra, 2 + Math.floor(difficulty))
   const sides = Math.random() < 0.5 ? [1, -1] : [Math.random() < 0.5 ? -1 : 1]
   for (let k = 0; k < count; k++) {
     const side = sides[k % sides.length]
-    const along = (k / count) * 110 + rand(-10, 10)
+    const along = (k / count) * Math.max(110, count * 24) + rand(-10, 10)
     const r = rand(22, 27)
     const [x, y] = at(along, side * (ROAD_WIDTH / 2 + rand(36, 60)))
     // Trampled, darker grass and boot prints leading out of the bush
@@ -180,7 +184,7 @@ export function banditAmbush({ layer, road, i, difficulty, enemies }) {
       ground.ellipse(fx, fy, 3, 2).fill({ color: '#3a2a1a', alpha: 0.45 })
     }
 
-    const b = bush(r)
+    const b = bush(r, stageAt(road.points[i].along / 20).biome) // blends in with the local scrub
     b.position.set(x, y)
     b.rotation = b.baseRotation = rand(0, Math.PI * 2)
     // A hood poking out on the road side, and a blade that catches the light

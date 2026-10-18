@@ -7,7 +7,8 @@ import { Peasant, PEASANT_RADIUS } from './peasant.js'
 import { Enemies } from './enemies.js'
 import { Stones } from './stones.js'
 import { Encounters } from './encounters/index.js'
-import { BARE, SLOTS, SLOT_NAMES, CONSUMABLES, BAG_SIZE, rollItem, sellValue, totalArmour, blockChance } from './items.js'
+import { stageAt, threatAt } from './threat.js'
+import { AMMO, BARE, SLOTS, SLOT_NAMES, CONSUMABLES, BAG_SIZE, rollItem, sellValue, totalArmour, blockChance } from './items.js'
 
 const PX_PER_METRE = 20
 const MAX_HEALTH = 5 // the peasant's hearts, hurt only on foot
@@ -17,17 +18,30 @@ const STAMINA_REGEN = 1 / 7 // and refills in 7 s
 const STAMINA_REGEN_DELAY = 0.8
 const WINDED_UNTIL = 0.3 // once emptied, the horse must recover this much first
 const KMH_PER_PX = 15 / 230
-const MAX_STONES = 8
-const STONE_REFILL = 1.4 // seconds to dig another stone out of the cart
 const INVULNERABLE = 0.8 // seconds of grace after being hit
-const GOLD_PER_KILL = 1
+const STAGE_BANNER_TIME = 4
 const ITEM_CHANCE = 0.45 // chance a chest also holds armour or a weapon
 const CART_REACH = 22 // extra melee reach swinging down from the cart
 const CAMERA_MARGIN = 90 // closest the player gets to the screen edge
 const LOOT_REACH = 34 // how close to stand to search a container
 const MOUNT_REACH = 48 // how close to the cart to climb back on
 const TOAST_TIME = 1.8
+const TRADE_REACH = 46 // how close to stand to a trader
 
+
+// Blend two 0xRRGGBB colours; snaps to `b` once close enough.
+function mixColour(a, b, t) {
+  const ch = (c, shift) => (c >> shift) & 0xff
+  let done = true
+  const mixed = [16, 8, 0].reduce((out, shift) => {
+    const from = ch(a, shift)
+    const to = ch(b, shift)
+    const v = Math.round(from + (to - from) * t)
+    if (Math.abs(to - v) > 1) done = false
+    return out | (v << shift)
+  }, 0)
+  return done ? b : mixed
+}
 
 export class Game {
   constructor(app, onHud) {
@@ -62,6 +76,7 @@ export class Game {
     this.encounters = new Encounters(props, this.road, this.enemies)
     this.encounters.place()
     this.scenery = new Scenery(ground, canopy, this.road, () => this.encounters.zones)
+    this.encounters.onNewZones = (zones) => this.scenery.clear(zones)
     this.scenery.update(0)
     this.stones = new Stones(air)
     this.air = air
@@ -80,8 +95,8 @@ export class Game {
     this.stamina = 1
     this.staminaRest = 0
     this.winded = false
-    this.ammo = MAX_STONES
-    this.refill = 0
+    this.ammo = Object.fromEntries(Object.entries(AMMO).map(([kind, a]) => [kind, a.max]))
+    this.refill = Object.fromEntries(Object.keys(AMMO).map((kind) => [kind, 0]))
     this.throwCooldown = 0
     this.invulnerable = 0
     this.shake = 0
@@ -89,16 +104,22 @@ export class Game {
     this.gold = 0
     this.equipment = Object.fromEntries(SLOTS.map((slot) => [slot, null]))
     this.meleeCooldown = 0
+    this.active = 'ranged' // which weapon is in hand: 'ranged' or 'melee'
     this.swings = []
     this.blockFlash = 0
     this.bag = Array(BAG_SIZE).fill(null)
     this.bagOpen = false
+    this.trading = null // the trader whose wares are on show
     this.toast = null
     this.time = 0
     this.state = 'playing'
     this.overReason = {}
     this.camX = start.x
     this.camY = start.y
+    this.stage = stageAt(0)
+    this.banner = { title: this.stage.name, sub: this.stage.biome.tagline, t: STAGE_BANNER_TIME }
+    this.groundColour = this.stage.biome.ground
+    this.app.renderer.background.color = this.groundColour
   }
 
   update(dt) {
@@ -120,10 +141,16 @@ export class Game {
     const interaction = this.interaction()
     if (this.input.pressed('interact') && interaction) interaction.act()
     if (this.input.pressed('bag')) this.toggleBag()
+    if (this.input.pressed('close')) {
+      this.trading = null
+      this.bagOpen = false
+    }
+    if (this.input.pressed('swap')) this.swapWeapon()
 
     const near = this.road.nearest(this.cart.x, this.cart.y, this.roadIndex)
     this.roadIndex = near.index
-    const onRoad = near.dist < ROAD_WIDTH / 2 + 4
+    const onMainRoad = near.dist < ROAD_WIDTH / 2 + 4
+    const onRoad = onMainRoad || this.encounters.onSideRoad(this.cart.x, this.cart.y)
 
     this.cart.update(dt, this.onFoot ? {} : keys, onRoad, obstacles, this.onFoot)
     if (this.onFoot) {
@@ -132,7 +159,7 @@ export class Game {
       this.peasant.update(dt, keys, aim.x, aim.y, [...obstacles, ...cartSolids])
     }
 
-    if (onRoad) this.best = Math.max(this.best, near.along)
+    if (onMainRoad) this.best = Math.max(this.best, near.along)
     const metres = Math.floor(this.best / PX_PER_METRE)
 
     this.road.ensureAhead(this.roadIndex)
@@ -152,17 +179,22 @@ export class Game {
     for (const reward of this.encounters.rewards.splice(0)) {
       this.gold += reward.gold
       this.scatter('coin', reward.gold, reward.x, reward.y)
-      this.say(`The farmer thanks you: +${reward.gold} gold`)
+      this.say(`${reward.message ?? 'The farmer thanks you'}: +${reward.gold} gold`, 1.5)
     }
     this.updatePickups(dt)
     this.updateAttacks(dt)
     this.drawMarker(this.interaction())
 
+    this.updateStage(dt, metres)
     this.updateCamera(dt)
     if (this.toast && (this.toast.t -= dt) <= 0) this.toast = null
     this.onHud({
       speed: this.onFoot ? 0 : Math.round(Math.max(0, this.cart.speed) * KMH_PER_PX),
       distance: metres,
+      stage: this.stage.name,
+      stageNumber: this.stage.number,
+      threat: threatAt(metres).level,
+      banner: this.banner && this.banner.t > 0 ? this.banner : null,
       health: this.health,
       maxHealth: MAX_HEALTH,
       cartHealth: this.cartHealth,
@@ -174,12 +206,16 @@ export class Game {
       bare: BARE,
       armour: totalArmour(this.equipment),
       block: Math.round(blockChance(this.equipment) * 100),
+      active: this.active,
       bag: this.bag.map((e) =>
         e && (e.type === 'gear' ? { ...e, value: sellValue(e.item) } : { ...e, item: CONSUMABLES[e.type], value: CONSUMABLES[e.type].value }),
       ),
       bagOpen: this.bagOpen,
-      ammo: this.ammo,
-      maxAmmo: MAX_STONES,
+      trade: this.tradeView(),
+      ammo: this.ammo[this.ranged.ammo],
+      maxAmmo: AMMO[this.ranged.ammo].max,
+      ammoKind: this.ranged.ammo,
+      ammoName: AMMO[this.ranged.ammo].name,
       kills: this.kills,
       gold: this.gold,
       onFoot: this.onFoot,
@@ -190,6 +226,21 @@ export class Game {
       overText: this.overReason.text,
     })
     this.input.endFrame()
+  }
+
+  // Crossing into a new region: announce it and fade the land to its colour.
+  updateStage(dt, metres) {
+    const stage = stageAt(metres)
+    if (stage.index !== this.stage.index) {
+      this.stage = stage
+      this.banner = { title: stage.name, sub: `Stage ${stage.number} · ${stage.biome.tagline}`, t: STAGE_BANNER_TIME }
+    }
+    if (this.banner) this.banner.t -= dt
+    const target = stage.biome.ground
+    if (this.groundColour !== target) {
+      this.groundColour = mixColour(this.groundColour, target, 1 - Math.exp(-dt * 1.5))
+      this.app.renderer.background.color = this.groundColour
+    }
   }
 
   // Where the peasant is right now, and how they're moving.
@@ -219,6 +270,16 @@ export class Game {
     }
     if (best) {
       return { label: 'E – Open the treasure chest', x: best.x, y: best.y, act: () => this.search(best) }
+    }
+    const trader = this.encounters.traders.find((t) => Math.hypot(t.x - p.x, t.y - p.y) < TRADE_REACH)
+    if (trader) {
+      const open = this.trading === trader
+      return {
+        label: open ? 'E – Stop trading' : `E – Trade with the ${trader.name.toLowerCase()}`,
+        x: trader.x,
+        y: trader.y,
+        act: () => (this.trading = open ? null : trader),
+      }
     }
     const { cartX, cartY } = this.cart
     if (Math.hypot(cartX - p.x, cartY - p.y) < MOUNT_REACH) {
@@ -289,6 +350,74 @@ export class Game {
   }
 
   // --- Bag -----------------------------------------------------------------
+
+  // --- Trading ---------------------------------------------------------------
+
+  // What the open trader's stall looks like to the HUD, or null.
+  tradeView() {
+    const t = this.trading
+    if (!t) return null
+    const p = this.peasant
+    // Walking off (or climbing on the cart) ends the conversation.
+    if (!this.onFoot || !t.open || Math.hypot(t.x - p.x, t.y - p.y) > TRADE_REACH + 40) {
+      this.trading = null
+      return null
+    }
+    return {
+      name: t.name,
+      offers: t.stock.map((offer, i) => {
+        const price = this.priceOf(offer)
+        const why = this.cannotBuy(offer, price)
+        const item = offer.kind === 'gear' ? offer.item : offer.kind === 'consumable' ? CONSUMABLES[offer.type] : null
+        return { i, kind: offer.kind, type: offer.type, name: item?.name ?? offer.name, item, price, sold: !!offer.sold, why }
+      }),
+    }
+  }
+
+  priceOf(offer) {
+    if (offer.type === 'repair') return offer.price * (MAX_CART_HEALTH - this.cartHealth)
+    if (offer.type === 'heal') return offer.price * (MAX_HEALTH - this.health)
+    return offer.price
+  }
+
+  // Why an offer can't be bought right now, or '' if it can.
+  cannotBuy(offer, price) {
+    if (offer.sold) return 'Sold'
+    if (offer.type === 'repair' && this.cartHealth >= MAX_CART_HEALTH) return 'Cart is sound'
+    if (offer.type === 'heal' && this.health >= MAX_HEALTH) return 'Already hale'
+    if (offer.type === 'ammo' && Object.entries(AMMO).every(([k, a]) => this.ammo[k] >= a.max)) return 'Quiver full'
+    if (price > this.gold) return 'Not enough gold'
+    if (offer.kind !== 'service' && !this.bag.includes(null)) {
+      const stackable = offer.kind === 'consumable' && this.bag.some((e) => e?.type === offer.type && e.count < CONSUMABLES[offer.type].stack)
+      if (!stackable) return 'Bag full'
+    }
+    return ''
+  }
+
+  buy(i) {
+    const offer = this.trading?.stock[i]
+    if (!offer) return
+    const price = this.priceOf(offer)
+    if (this.cannotBuy(offer, price)) return
+    this.gold -= price
+    if (offer.kind === 'gear') {
+      this.addToBag({ type: 'gear', item: offer.item })
+      offer.sold = true
+      this.say(`Bought ${offer.item.name} – it's in your bag`)
+    } else if (offer.kind === 'consumable') {
+      this.addToBag({ type: offer.type, count: 1 })
+      this.say(`Bought a ${CONSUMABLES[offer.type].name}`)
+    } else if (offer.type === 'repair') {
+      this.cartHealth = MAX_CART_HEALTH
+      this.say('The wheelwright sets your cart to rights')
+    } else if (offer.type === 'heal') {
+      this.health = MAX_HEALTH
+      this.say('The healer binds your wounds')
+    } else if (offer.type === 'ammo') {
+      for (const [kind, { max }] of Object.entries(AMMO)) this.ammo[kind] = max
+      this.say('Stones, arrows and bolts restocked')
+    }
+  }
 
   toggleBag() {
     this.bagOpen = !this.bagOpen
@@ -368,23 +497,37 @@ export class Game {
     return this.equipment.melee ?? BARE.melee
   }
 
-  // Show the equipped melee weapon in hand, on foot or on the driver's bench.
+  // Show the equipped weapons in hand, on foot or on the driver's bench:
+  // melee in the right hand, a bow, crossbow or sling in the left.
   updateHeldWeapon(dt) {
-    const item = this.equipment.melee
-    this.peasant.weapon.set(item)
-    const held = this.cart.cart.weapon
-    held.set(item)
+    const melee = this.equipment.melee
+    const ranged = this.equipment.ranged
+    const loaded = this.ammo[this.ranged.ammo] > 0 && this.throwCooldown <= 0
+    const { weapon, bow } = this.cart.cart
+    // Only the weapon in hand is drawn; the other is slung on your back.
+    const inHand = this.active
+    for (const holder of [this.peasant.weapon, weapon]) holder.set(inHand === 'melee' ? melee : null)
+    for (const holder of [this.peasant.bow, bow]) holder.set(inHand === 'ranged' ? ranged : null, loaded)
     if (!this.onFoot) {
       const aim = this.pointerWorld()
       const { cartX, cartY, cartHeading } = this.cart
-      held.update(dt, Math.atan2(aim.y - cartY, aim.x - cartX) - cartHeading)
+      const facing = Math.atan2(aim.y - cartY, aim.x - cartX) - cartHeading
+      weapon.update(dt, facing)
+      bow.update(dt, facing)
     }
+  }
+
+  // Q: put away one weapon and take out the other.
+  swapWeapon() {
+    this.active = this.active === 'ranged' ? 'melee' : 'ranged'
+    const weapon = this.active === 'ranged' ? this.ranged : this.melee
+    this.say(`${weapon.name} in hand`)
   }
 
   onKill(enemy) {
     this.kills++
-    this.gold += GOLD_PER_KILL
-    this.drop('coin', enemy.x, enemy.y)
+    this.gold += enemy.gold
+    this.scatter('coin', enemy.gold, enemy.x, enemy.y)
   }
 
   // Right-click (or F) swings the melee weapon toward the mouse, striking
@@ -392,7 +535,7 @@ export class Game {
   updateMelee(dt, from) {
     this.meleeCooldown -= dt
     const weapon = this.melee
-    if ((this.input.pointer.rightDown || this.input.is('melee')) && this.meleeCooldown <= 0) {
+    if (this.active === 'melee' && this.input.pointer.down && this.meleeCooldown <= 0) {
       this.meleeCooldown = weapon.cooldown
       const aim = this.pointerWorld()
       const facing = Math.atan2(aim.y - from.y, aim.x - from.x)
@@ -465,32 +608,37 @@ export class Game {
 
   updateThrowing(dt, from) {
     this.throwCooldown -= dt
-    if (this.ammo < MAX_STONES) {
-      this.refill += dt
-      if (this.refill >= STONE_REFILL) {
-        this.refill = 0
-        this.ammo++
+    for (const [kind, { max, refill }] of Object.entries(AMMO)) {
+      if (this.ammo[kind] >= max) continue
+      this.refill[kind] += dt
+      if (this.refill[kind] >= refill) {
+        this.refill[kind] = 0
+        this.ammo[kind]++
       }
     }
 
     const weapon = this.ranged
     const target = this.pointerWorld()
-    if (this.input.pointer.down && this.throwCooldown <= 0 && this.ammo > 0) {
+    const loaded = this.ammo[weapon.ammo] > 0
+    const inHand = this.active === 'ranged'
+    if (inHand && this.input.pointer.down && this.throwCooldown <= 0 && loaded) {
       this.stones.throw(from.x, from.y, target.x, target.y, from.vx, from.vy, weapon)
-      this.ammo--
+      this.ammo[weapon.ammo]--
+      ;(this.onFoot ? this.peasant.bow : this.cart.cart.bow).fire()
       this.throwCooldown = weapon.cooldown
     }
 
     // Dotted aim line out to the throwing range.
+    const a = this.aim.clear()
+    if (!inHand) return
     const dx = target.x - from.x
     const dy = target.y - from.y
     const len = Math.hypot(dx, dy) || 1
     const reach = Math.min(weapon.range, len)
-    const a = this.aim.clear()
     for (let d = 30; d < reach; d += 18) {
       a.circle(from.x + (dx / len) * d, from.y + (dy / len) * d, 1.8)
     }
-    a.fill({ color: '#fff4d6', alpha: this.ammo > 0 ? 0.55 : 0.15 })
+    a.fill({ color: '#fff4d6', alpha: loaded ? 0.55 : 0.15 })
     a.circle(from.x + (dx / len) * reach, from.y + (dy / len) * reach, 7).stroke({ width: 1.5, color: '#fff4d6', alpha: 0.7 })
   }
 
@@ -554,14 +702,15 @@ export class Game {
       }
       this.invulnerable = INVULNERABLE
       this.shake = 0.3
-      const goblins = e.type === 'goblin'
+      const goblins = e.faction === 'goblin'
       if (this.onFoot) {
-        if (--this.health <= 0) {
+        this.health = Math.max(0, this.health - e.damage)
+        if (this.health <= 0) {
           goblins
             ? this.end('Overrun by goblins', 'the goblins caught you on foot')
             : this.end('Robbed by bandits', 'the bandits cut you down by the road')
         }
-      } else if (--this.cartHealth <= 0) {
+      } else if ((this.cartHealth = Math.max(0, this.cartHealth - e.damage)) <= 0) {
         goblins
           ? this.end('Cart torn apart', 'the goblins hacked your cart to kindling')
           : this.end('Cart smashed', 'the bandits smashed your cart and took the horse')

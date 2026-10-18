@@ -1,5 +1,5 @@
 import { Container, Graphics } from 'pixi.js'
-import { WeaponHolder } from './weapon.js'
+import { RangedHolder, WeaponHolder } from './weapon.js'
 
 const MAX_SPEED = 150 // px/s on the road at a steady trot
 const GALLOP_SPEED = 245 // px/s while boosting (Shift)
@@ -72,6 +72,7 @@ function drawCart() {
   cart.driver = seat
   cart.weapon = new WeaponHolder(seat, 9, 0)
   seat.setChildIndex(cart.weapon.pivot, 0)
+  cart.bow = new RangedHolder(seat, 9, -4)
   return cart
 }
 

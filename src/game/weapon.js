@@ -67,3 +67,63 @@ export class WeaponHolder {
     this.pivot.rotation = facing + angle
   }
 }
+
+// Ranged weapons held out in front, pointing along +x at the target.
+function drawRanged(g, icon, loaded) {
+  const wood = '#8b6236'
+  switch (icon) {
+    case 'bow':
+      g.moveTo(2, -13).quadraticCurveTo(14, 0, 2, 13).stroke({ width: 3, color: wood, cap: 'round' })
+      g.moveTo(2, -13).lineTo(loaded ? -4 : 2, 0).lineTo(2, 13).stroke({ width: 1, color: '#f3e3c0' })
+      if (loaded) {
+        g.moveTo(-4, 0).lineTo(16, 0).stroke({ width: 2, color: wood })
+        g.poly([19, 0, 15, -2.5, 15, 2.5]).fill('#d8dde2')
+      }
+      break
+    case 'crossbow':
+      g.moveTo(-6, 0).lineTo(14, 0).stroke({ width: 4, color: '#6e4a28', cap: 'round' })
+      g.moveTo(9, -11).quadraticCurveTo(14, 0, 9, 11).stroke({ width: 2.5, color: '#b9c0c8', cap: 'round' })
+      g.moveTo(9, -11).lineTo(loaded ? 2 : 9, 0).lineTo(9, 11).stroke({ width: 1, color: '#f3e3c0' })
+      if (loaded) g.moveTo(2, 0).lineTo(15, 0).stroke({ width: 2, color: '#5e3f22' })
+      break
+    case 'sling':
+      g.moveTo(-2, -2).lineTo(8, -1).moveTo(-2, 2).lineTo(8, 1).stroke({ width: 1, color: '#c9b28a' })
+      g.ellipse(9, 0, 3.5, 3).fill('#6e4a28')
+      if (loaded) g.circle(9, 0, 2).fill('#9a968c')
+      break
+  }
+}
+
+// Holds the equipped ranged weapon in the left hand, aimed at the mouse,
+// with a kick back each time it's loosed.
+export class RangedHolder {
+  constructor(parent, x = 0, y = -4) {
+    this.pivot = new Container()
+    this.pivot.position.set(x, y)
+    this.g = new Graphics()
+    this.pivot.addChild(this.g)
+    parent.addChild(this.pivot)
+    this.key = undefined
+    this.kick = 0
+  }
+
+  set(item, loaded) {
+    const icon = item?.icon ?? null
+    const key = `${icon}:${loaded}`
+    if (key === this.key) return
+    this.key = key
+    this.g.clear()
+    if (icon) drawRanged(this.g, icon, loaded)
+  }
+
+  fire() {
+    this.kick = 1
+  }
+
+  // `facing` is the aim direction relative to the parent's own rotation.
+  update(dt, facing = 0) {
+    this.kick = Math.max(0, this.kick - dt * 6)
+    this.pivot.rotation = facing
+    this.g.x = HAND - this.kick * 5
+  }
+}

@@ -55,10 +55,10 @@ export function addProp(view, kind, x, y, size) {
   return g
 }
 
-// Maybe place a treasure chest here (see CHEST_CHANCE). If placed, it's added
+// Maybe place a treasure chest here (CHEST_CHANCE unless told otherwise). If placed, it's added
 // to `view` and to the encounter's `list` of loot.
-export function maybeAddChest(list, view, x, y) {
-  if (Math.random() >= CHEST_CHANCE) return null
+export function maybeAddChest(list, view, x, y, chance = CHEST_CHANCE) {
+  if (Math.random() >= chance) return null
 
   const g = new Graphics()
   g.position.set(x, y)

@@ -11,7 +11,12 @@ export function describe(item) {
   if (item.desc) return [item.desc]
   if (item.armour !== undefined) return [`+${item.armour} armour`]
   if (item.range) {
-    return [`Damage ${item.damage}`, `Range ${Math.round(item.range / 20)} m`, `${(1 / item.cooldown).toFixed(1)} shots / s`]
+    return [
+      `Damage ${item.damage}`,
+      `Range ${Math.round(item.range / 20)} m`,
+      `${(1 / item.cooldown).toFixed(1)} shots / s`,
+      `Uses ${item.ammo}`,
+    ]
   }
   const reach = item.reach >= 45 ? 'long' : item.reach >= 30 ? 'medium' : 'short'
   return [`Damage ${item.damage}`, `Reach ${reach}`, `${(1 / item.cooldown).toFixed(1)} swings / s`]

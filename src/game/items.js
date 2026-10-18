@@ -11,12 +11,20 @@ export const SLOT_NAMES = {
   melee: 'Melee weapon',
 }
 
+// Each kind of ranged weapon draws on its own supply, which slowly refills:
+// stones dug out of the cart bed, arrows and bolts from the quiver.
+export const AMMO = {
+  stones: { name: 'Stones', max: 8, refill: 1.4 },
+  arrows: { name: 'Arrows', max: 10, refill: 1.6 },
+  bolts: { name: 'Bolts', max: 6, refill: 2.4 },
+}
+
 export const BLOCK_PER_ARMOUR = 0.05 // chance to block a blow, per point
 export const MAX_BLOCK = 0.6
 
 // What you fight with when the slot is empty.
 export const BARE = {
-  ranged: { name: 'Thrown stones', icon: 'stone', tier: 0, damage: 1, range: 460, cooldown: 0.3, speed: 560, shot: 'stone' },
+  ranged: { name: 'Thrown stones', icon: 'stone', tier: 0, damage: 1, range: 460, cooldown: 0.3, speed: 560, shot: 'stone', ammo: 'stones' },
   melee: { name: 'Fists', icon: 'fist', tier: 0, damage: 1, reach: 20, cooldown: 0.5 },
 }
 
@@ -28,9 +36,9 @@ export const ITEMS = [
   ...armour('body', 'body', [['Padded Gambeson', 1], ['Mail Shirt', 2], ['Steel Breastplate', 3]]),
   ...armour('legs', 'legs', [['Leather Breeches', 1], ['Mail Chausses', 2], ['Steel Greaves', 3]]),
 
-  { slot: 'ranged', icon: 'sling', name: 'Shepherd’s Sling', tier: 1, damage: 1, range: 600, cooldown: 0.22, speed: 660, shot: 'stone' },
-  { slot: 'ranged', icon: 'bow', name: 'Hunting Bow', tier: 2, damage: 2, range: 650, cooldown: 0.45, speed: 820, shot: 'arrow' },
-  { slot: 'ranged', icon: 'crossbow', name: 'Crossbow', tier: 3, damage: 3, range: 720, cooldown: 0.8, speed: 980, shot: 'bolt' },
+  { slot: 'ranged', icon: 'sling', name: 'Shepherd’s Sling', tier: 1, damage: 1, range: 600, cooldown: 0.22, speed: 660, shot: 'stone', ammo: 'stones' },
+  { slot: 'ranged', icon: 'bow', name: 'Hunting Bow', tier: 2, damage: 2, range: 650, cooldown: 0.36, speed: 820, shot: 'arrow', ammo: 'arrows' },
+  { slot: 'ranged', icon: 'crossbow', name: 'Crossbow', tier: 3, damage: 3, range: 720, cooldown: 0.8, speed: 980, shot: 'bolt', ammo: 'bolts' },
 
   { slot: 'melee', icon: 'club', name: 'Cudgel', tier: 1, damage: 1, reach: 30, cooldown: 0.4 },
   { slot: 'melee', icon: 'sword', name: 'Short Sword', tier: 2, damage: 2, reach: 32, cooldown: 0.42 },

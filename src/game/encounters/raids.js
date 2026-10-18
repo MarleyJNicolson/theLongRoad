@@ -31,7 +31,13 @@ function drawFarmstead(g, pt, { brokenFence, charred }) {
   g.fill('#5e3f22')
   // Path from the door to the gate
   g.poly(rect(28, -7, 50, 7)).fill({ color: '#b9925e', alpha: 0.8 })
-  // House: shadow, walls, then a two-sided thatched roof
+  drawHouse(g, pt, charred)
+}
+
+// A thatched cottage, door facing +x in house-local coordinates.
+export function drawHouse(g, pt, charred = false) {
+  const rect = (x1, y1, x2, y2) => [...pt(x1, y1), ...pt(x2, y1), ...pt(x2, y2), ...pt(x1, y2)]
+  // Shadow, walls, then a two-sided thatched roof
   g.poly(rect(-24, -34, 34, 44)).fill({ color: '#000', alpha: 0.22 })
   g.poly(rect(-30, -40, 30, 40)).fill('#cbb98c')
   g.poly(rect(-28, -38, 0, 38)).fill('#c9a24a')
@@ -48,7 +54,7 @@ function drawFarmstead(g, pt, { brokenFence, charred }) {
 }
 
 // The farmer, who comes out to thank you once the raiders are gone.
-function drawFarmer() {
+export function drawFarmer() {
   const farmer = new Container()
   const arm = new Graphics().roundRect(0, -2, 11, 4, 2).fill('#7a5a3a')
   arm.position.set(0, -6)
@@ -101,7 +107,7 @@ function farmerReward(farm, view) {
 
 // Bandit house raid: the door kicked in, the family's goods hauled out to a
 // waiting cart, and bandits picking over the yard.
-export function banditHouseRaid({ layer, road, i, difficulty, enemies }) {
+export function banditHouseRaid({ layer, road, i, difficulty, extra, enemies }) {
   const farm = setUpFarm(road, i)
   if (!farm) return null
   const { pt } = farm
@@ -131,7 +137,7 @@ export function banditHouseRaid({ layer, road, i, difficulty, enemies }) {
   const thanks = farmerReward(farm, view)
   const wander = { x: farm.yx, y: farm.yy, min: 10, max: 42 }
   const members = []
-  for (let k = 0; k < Math.min(6, 3 + Math.floor(difficulty)); k++) {
+  for (let k = 0; k < Math.min(6 + extra, 3 + Math.floor(difficulty)); k++) {
     const a = rand(0, Math.PI * 2)
     members.push(enemies.add('bandit', farm.yx + Math.cos(a) * 30, farm.yy + Math.sin(a) * 30, { x: farm.yx, y: farm.yy, wander }))
   }
@@ -156,7 +162,7 @@ export function banditHouseRaid({ layer, road, i, difficulty, enemies }) {
 
 // Goblin house raid: the thatch is ablaze, smoke pours off the roof and the
 // goblins caper round the yard, whooping.
-export function goblinHouseRaid({ layer, road, i, difficulty, enemies }) {
+export function goblinHouseRaid({ layer, road, i, difficulty, extra, enemies }) {
   const farm = setUpFarm(road, i)
   if (!farm) return null
   const { pt } = farm
@@ -193,7 +199,7 @@ export function goblinHouseRaid({ layer, road, i, difficulty, enemies }) {
   const thanks = farmerReward(farm, view)
   const wander = { x: farm.yx, y: farm.yy, min: 12, max: 50 }
   const members = []
-  for (let k = 0; k < Math.min(8, 4 + Math.floor(difficulty * 1.5)); k++) {
+  for (let k = 0; k < Math.min(8 + extra, 4 + Math.floor(difficulty * 1.5)); k++) {
     const a = rand(0, Math.PI * 2)
     members.push(enemies.add('goblin', farm.yx + Math.cos(a) * 35, farm.yy + Math.sin(a) * 35, { x: farm.yx, y: farm.yy, wander }))
   }

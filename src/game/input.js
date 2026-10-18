@@ -7,7 +7,8 @@ const KEYS = {
   interact: ['KeyE'],
   bag: ['KeyB', 'KeyI'],
   boost: ['ShiftLeft', 'ShiftRight'],
-  melee: ['KeyF'],
+  swap: ['KeyQ', 'MouseRight'],
+  close: ['Escape'],
 }
 
 export class Input {
@@ -25,13 +26,16 @@ export class Input {
     this.onPointerDown = (e) => {
       this.onPointerMove(e)
       if (e.button === 0) this.pointer.down = true
-      if (e.button === 2) this.pointer.rightDown = true
+      if (e.button === 2) {
+        this.pointer.rightDown = true
+        this.justPressed.add('MouseRight')
+      }
     }
     this.onPointerUp = (e) => {
       if (e.button === 0) this.pointer.down = false
       if (e.button === 2) this.pointer.rightDown = false
     }
-    this.onContextMenu = (e) => e.preventDefault() // right-click is for melee
+    this.onContextMenu = (e) => e.preventDefault() // right-click swaps weapons
     canvas.addEventListener('pointermove', this.onPointerMove)
     canvas.addEventListener('pointerdown', this.onPointerDown)
     canvas.addEventListener('contextmenu', this.onContextMenu)

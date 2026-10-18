@@ -1,5 +1,5 @@
 import { Container, Graphics } from 'pixi.js'
-import { WeaponHolder } from './weapon.js'
+import { RangedHolder, WeaponHolder } from './weapon.js'
 
 const WALK_SPEED = 120
 export const PEASANT_RADIUS = 8
@@ -32,6 +32,7 @@ export class Peasant {
     // Weapon sits under the body so the grip disappears into the hand.
     this.weapon = new WeaponHolder(this.view)
     this.view.setChildIndex(this.weapon.pivot, 0)
+    this.bow = new RangedHolder(this.view)
     this.view.visible = false
     layer.addChild(this.view)
   }
@@ -76,6 +77,7 @@ export class Peasant {
     this.facing = Math.atan2(aimY - this.y, aimX - this.x)
     this.step += Math.hypot(this.vx, this.vy) * dt * 0.2
     this.weapon.update(dt)
+    this.bow.update(dt)
     this.render()
   }
 

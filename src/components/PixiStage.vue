@@ -4,11 +4,16 @@ import { Application } from 'pixi.js'
 import { Game } from '../game/Game.js'
 import EquipmentPanel from './EquipmentPanel.vue'
 import InventoryPanel from './InventoryPanel.vue'
+import TradePanel from './TradePanel.vue'
 
 const container = useTemplateRef('container')
 const hud = reactive({
   speed: 0,
   distance: 0,
+  stage: '',
+  stageNumber: 1,
+  threat: 0,
+  banner: null,
   health: 5,
   maxHealth: 5,
   cartHealth: 10,
@@ -22,7 +27,11 @@ const hud = reactive({
   block: 0,
   bag: [],
   bagOpen: false,
+  active: 'ranged',
+  trade: null,
   ammo: 8,
+  ammoKind: 'stones',
+  ammoName: 'Stones',
   maxAmmo: 8,
   kills: 0,
   gold: 0,
@@ -57,6 +66,7 @@ onUnmounted(() => {
   <div ref="container" class="pixi-container"></div>
 
   <div class="hud">
+    <div class="stat stage"><span>Stage {{ hud.stageNumber }} · Threat {{ hud.threat.toFixed(1) }}</span>{{ hud.stage }}</div>
     <div class="stat"><span>Distance</span>{{ hud.distance }} m</div>
     <div class="stat"><span>Speed</span>{{ hud.speed }} km/h</div>
     <div class="stat"><span>Raiders felled</span>{{ hud.kills }}</div>
@@ -82,8 +92,8 @@ onUnmounted(() => {
       </div>
     </div>
     <div class="row">
-      <label>Ammo</label>
-      <span v-for="i in hud.maxAmmo" :key="'s' + i" class="pebble" :class="{ lost: i > hud.ammo }"></span>
+      <label>{{ hud.ammoName }}</label>
+      <span v-for="i in hud.maxAmmo" :key="hud.ammoKind + i" class="pebble" :class="[hud.ammoKind, { lost: i > hud.ammo }]"></span>
     </div>
   </div>
 
@@ -94,6 +104,7 @@ onUnmounted(() => {
     :armour="hud.armour"
     :block="hud.block"
     :bag-open="hud.bagOpen"
+    :active="hud.active"
     @unequip="(slot) => game?.unequip(slot)"
     @toggle-bag="game?.toggleBag()"
   />
@@ -107,20 +118,36 @@ onUnmounted(() => {
     @close="game?.toggleBag()"
   />
 
+  <TradePanel
+    v-if="hud.trade && !hud.over"
+    :trade="hud.trade"
+    :gold="hud.gold"
+    @buy="(i) => game?.buy(i)"
+    @close="game && (game.trading = null)"
+  />
+
+  <Transition name="banner" mode="out-in">
+    <div v-if="hud.banner && !hud.over" :key="hud.banner.title" class="banner">
+      <h2>{{ hud.banner.title }}</h2>
+      <p>{{ hud.banner.sub }}</p>
+    </div>
+  </Transition>
+
   <div v-if="hud.toast" class="toast">{{ hud.toast }}</div>
   <div v-if="hud.prompt" class="prompt">{{ hud.prompt }}</div>
 
   <div class="controls">
     <template v-if="hud.onFoot">
-      WASD – walk &nbsp;·&nbsp; E – open chest / climb on &nbsp;·&nbsp; Click – shoot &nbsp;·&nbsp; Right-click / F – melee &nbsp;·&nbsp; B – bag
+      WASD – walk &nbsp;·&nbsp; E – open chest / climb on &nbsp;·&nbsp; Click – attack &nbsp;·&nbsp; Q / right-click – switch weapon &nbsp;·&nbsp; B – bag
     </template>
     <template v-else>
-      W / S – faster / slower &nbsp;·&nbsp; Shift – gallop &nbsp;·&nbsp; A / D – steer &nbsp;·&nbsp; E – get off &nbsp;·&nbsp; Click – shoot &nbsp;·&nbsp; Right-click / F – melee &nbsp;·&nbsp; B – bag
+      W / S – faster / slower &nbsp;·&nbsp; Shift – gallop &nbsp;·&nbsp; A / D – steer &nbsp;·&nbsp; E – get off &nbsp;·&nbsp; Click – attack &nbsp;·&nbsp; Q / right-click – switch weapon &nbsp;·&nbsp; B – bag
     </template>
   </div>
 
   <div v-if="hud.over" class="overlay">
     <h1>{{ hud.overTitle }}</h1>
+    <p class="reached">You reached {{ hud.stage }} – stage {{ hud.stageNumber }}</p>
     <p>You travelled {{ hud.distance }} m and felled {{ hud.kills }} raiders before {{ hud.overText }}.</p>
     <p>{{ hud.gold }} gold was lost along with everything else.</p>
     <p class="hint">Press Space to try again</p>
@@ -223,6 +250,22 @@ onUnmounted(() => {
   box-shadow: inset -2px -2px 0 #77736a;
 }
 
+/* Arrows and bolts stand upright in the quiver */
+.pebble.arrows,
+.pebble.bolts {
+  width: 4px;
+  height: 16px;
+  border-radius: 1px;
+  box-shadow: none;
+  background: linear-gradient(#b9c0c8 0 22%, #8b6236 22% 80%, #e8e0c8 80%);
+}
+
+.pebble.bolts {
+  width: 5px;
+  height: 12px;
+  background: linear-gradient(#b9c0c8 0 25%, #6e4a28 25% 82%, #5e3f22 82%);
+}
+
 .heart.lost,
 .pebble.lost {
   opacity: 0.2;
@@ -282,6 +325,46 @@ onUnmounted(() => {
   font-family: Georgia, serif;
   font-size: 14px;
   pointer-events: none;
+}
+
+.stat.stage {
+  min-width: 190px;
+}
+
+.banner {
+  position: fixed;
+  top: 22%;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  font-family: Georgia, serif;
+  color: #fff4d6;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+}
+
+.banner h2 {
+  font-size: 44px;
+  font-weight: normal;
+  letter-spacing: 0.06em;
+}
+
+.banner p {
+  margin-top: 4px;
+  font-size: 16px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+.banner-enter-active,
+.banner-leave-active {
+  transition: opacity 0.8s ease;
+}
+
+.banner-enter-from,
+.banner-leave-to {
+  opacity: 0;
 }
 
 .prompt,

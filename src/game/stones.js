@@ -8,13 +8,22 @@ function drawShot(shot) {
   if (shot === 'stone') {
     g.circle(0, 0, 4).fill('#8f8b82').circle(-1.2, -1.2, 1.6).fill('#b5b1a6')
   } else {
-    // Arrow or bolt, drawn pointing along +x
-    const len = shot === 'bolt' ? 12 : 16
-    g.moveTo(-len / 2, 0).lineTo(len / 2, 0).stroke({ width: 2, color: '#6e4a28' })
-    g.poly([len / 2 + 4, 0, len / 2 - 1, -2.5, len / 2 - 1, 2.5]).fill('#9a9a9a')
-    g.poly([-len / 2, 0, -len / 2 - 4, -3, -len / 2 + 2, 0, -len / 2 - 4, 3]).fill(shot === 'bolt' ? '#5e3f22' : '#e8e0c8')
+    // Arrow or bolt, drawn pointing along +x: shaft, steel head, fletching
+    const bolt = shot === 'bolt'
+    const half = bolt ? 9 : 13
+    g.moveTo(-half, 0).lineTo(half, 0).stroke({ width: bolt ? 3 : 2.5, color: '#8b6236', cap: 'round' })
+    g.poly([half + 7, 0, half - 1, -4, half - 1, 4]).fill('#d8dde2').stroke({ width: 1, color: '#6b7178' })
+    const feather = bolt ? '#5e3f22' : '#ffffff'
+    g.poly([-half, 0, -half - 6, -5, -half + 4, 0]).fill(feather)
+    g.poly([-half, 0, -half - 6, 5, -half + 4, 0]).fill(feather)
   }
   return g
+}
+
+function drawShadow(shot) {
+  const g = new Graphics()
+  if (shot === 'stone') return g.ellipse(0, 0, 4, 3).fill({ color: '#000', alpha: 0.25 })
+  return g.moveTo(-12, 0).lineTo(14, 0).stroke({ width: 2.5, color: '#000', alpha: 0.2, cap: 'round' })
 }
 
 // Missiles loosed by the peasant: stones are lobbed in an arc, arrows and
@@ -34,14 +43,14 @@ export class Stones {
     const lobbed = weapon.shot === 'stone'
 
     const view = new Container()
-    const shadow = new Graphics().ellipse(0, 0, 4, 3).fill({ color: '#000', alpha: 0.25 })
+    const shadow = drawShadow(weapon.shot)
     const stone = drawShot(weapon.shot)
     view.addChild(shadow, stone)
     this.layer.addChild(view)
 
     const vx = (dx / len) * weapon.speed + (lobbed ? carryX : 0)
     const vy = (dy / len) * weapon.speed + (lobbed ? carryY : 0)
-    if (!lobbed) stone.rotation = Math.atan2(vy, vx)
+    if (!lobbed) stone.rotation = shadow.rotation = Math.atan2(vy, vx)
     this.list.push({
       view,
       stone,

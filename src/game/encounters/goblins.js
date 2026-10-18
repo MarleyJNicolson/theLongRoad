@@ -3,7 +3,7 @@ import { ROAD_WIDTH } from '../road.js'
 import { addProp, maybeAddChest } from '../loot.js'
 import { rand, randInt, roadFrame, sideThatFits, drawClearing, campfire } from './helpers.js'
 
-function drawHideTent(g, x, y, facing) {
+export function drawHideTent(g, x, y, facing) {
   const c = Math.cos(facing)
   const s = Math.sin(facing)
   const pt = (fx, fy) => [x + fx * c - fy * s, y + fx * s + fy * c]
@@ -15,7 +15,7 @@ function drawHideTent(g, x, y, facing) {
   for (const [fx, fy] of [[-18, -10], [8, -16], [-6, 14]]) g.circle(...pt(fx, fy), 3).fill('#6e5a40')
 }
 
-function drawSkullTotem(g, x, y) {
+export function drawSkullTotem(g, x, y) {
   g.circle(x + 3, y + 3, 7).fill({ color: '#000', alpha: 0.2 })
   g.circle(x, y, 3).fill('#5a3a1a')
   g.circle(x, y - 2, 6).fill('#e8e0c8')
@@ -23,7 +23,7 @@ function drawSkullTotem(g, x, y) {
   g.circle(x + 2, y - 3, 1.6).fill('#1a1008')
 }
 
-function scatterBones(g, x, y, spreadX, spreadY, count) {
+export function scatterBones(g, x, y, spreadX, spreadY, count) {
   for (let k = 0; k < count; k++) {
     const bx = x + rand(-spreadX, spreadX)
     const by = y + rand(-spreadY, spreadY)
@@ -35,7 +35,7 @@ function scatterBones(g, x, y, spreadX, spreadY, count) {
 
 // Goblin camp: hide tents round a campfire in a clearing just off the road.
 // The goblins mill about until the cart comes into view, then swarm it.
-export function goblinCamp({ layer, road, i, difficulty, enemies }) {
+export function goblinCamp({ layer, road, i, difficulty, extra, enemies }) {
   const offset = ROAD_WIDTH / 2 + 125
   const side = sideThatFits(road, i, offset)
   if (!side) return null
@@ -72,7 +72,7 @@ export function goblinCamp({ layer, road, i, difficulty, enemies }) {
 
   const wander = { x: cx, y: cy, min: 32, max: 70 }
   const members = []
-  for (let k = 0; k < Math.min(7, 3 + Math.floor(difficulty * 1.5)); k++) {
+  for (let k = 0; k < Math.min(7 + extra, 3 + Math.floor(difficulty * 1.5)); k++) {
     const a = rand(0, Math.PI * 2)
     const r = rand(32, 65)
     members.push(enemies.add('goblin', cx + Math.cos(a) * r, cy + Math.sin(a) * r, { x: cx, y: cy, wander }))
@@ -91,7 +91,7 @@ export function goblinCamp({ layer, road, i, difficulty, enemies }) {
 
 // Goblin burrows: dirt mounds right beside the road. Goblins pop out of the
 // holes one after another as the cart rolls past.
-export function goblinBurrows({ layer, road, i, difficulty, enemies }) {
+export function goblinBurrows({ layer, road, i, difficulty, extra, enemies }) {
   const { at, n } = roadFrame(road, i)
   const view = new Container()
   const g = new Graphics()
@@ -110,7 +110,7 @@ export function goblinBurrows({ layer, road, i, difficulty, enemies }) {
     for (let s = 0; s < 6; s++) g.circle(x + rand(-28, 28), y + rand(-24, 24), rand(1.5, 3.5))
     g.fill('#7a5c3a')
     const facing = Math.atan2(-n.y * side, -n.x * side)
-    const count = k < Math.min(4, 1 + difficulty) ? 2 : 1
+    const count = (k < Math.min(4, 1 + difficulty) ? 2 : 1) + Math.min(2, Math.floor(extra / 2))
     for (let c = 0; c < count; c++) {
       members.push(enemies.add('goblin', x, y, { x, y, facing, hidden: true }))
     }
@@ -145,7 +145,7 @@ export function goblinBurrows({ layer, road, i, difficulty, enemies }) {
 
 // Goblin looters: a merchant's wagon overturned at the roadside, goods strewn
 // everywhere. The goblins are busy picking it over and slow to notice you.
-export function goblinLooters({ layer, road, i, difficulty, enemies }) {
+export function goblinLooters({ layer, road, i, difficulty, extra, enemies }) {
   const { at, d } = roadFrame(road, i)
   const side = Math.random() < 0.5 ? -1 : 1
   const lateral = side * (ROAD_WIDTH / 2 - 4)
@@ -192,7 +192,7 @@ export function goblinLooters({ layer, road, i, difficulty, enemies }) {
 
   const wander = { x: wx, y: wy, min: 34, max: 58 }
   const members = []
-  for (let k = 0; k < Math.min(6, 3 + Math.floor(difficulty)); k++) {
+  for (let k = 0; k < Math.min(6 + extra, 3 + Math.floor(difficulty)); k++) {
     const a = rand(0, Math.PI * 2)
     members.push(enemies.add('goblin', wx + Math.cos(a) * 45, wy + Math.sin(a) * 40, { x: wx, y: wy, wander }))
   }

@@ -1,10 +1,16 @@
 import { SEGMENT } from '../road.js'
 import { rand } from './helpers.js'
+import { stageAt, threatAt } from '../threat.js'
 import { goblinCamp, goblinBurrows, goblinLooters } from './goblins.js'
 import { banditCamp, banditRoadblock, banditAmbush } from './bandits.js'
 import { banditHouseRaid, goblinHouseRaid } from './raids.js'
+import { sideRoad, onSideRoad } from './sideroads.js'
 
 const FIRST_AT = 45 // road point index of the first encounter
+const SIDE_ROAD_CHANCE = 0.22 // of an encounter being a turning to somewhere bigger
+const SIDE_ROADS_FROM = 300 // metres
+const FIRST_SIDE_ROAD_BY = 450 // metres: there's always one early on
+const MAX_SIDE_ROAD_GAP = 600 // metres: never longer than this without one
 
 // Some encounters need room beside the road and can fail to fit; each
 // faction's fallback always fits.
@@ -23,11 +29,13 @@ const FALLBACK = {
   bandit: TABLE.find((t) => t.kind === 'banditAmbush'),
 }
 
-function pick(exclude) {
+// Weighted pick, leaning toward whatever the region is known for.
+function pick(exclude, biome) {
   const options = TABLE.filter((t) => t !== exclude)
-  let roll = Math.random() * options.reduce((sum, t) => sum + t.weight, 0)
+  const weight = (t) => t.weight * (biome.weights[t.kind] ?? 1)
+  let roll = Math.random() * options.reduce((sum, t) => sum + weight(t), 0)
   for (const t of options) {
-    if ((roll -= t.weight) < 0) return t
+    if ((roll -= weight(t)) < 0) return t
   }
   return options[0]
 }
@@ -43,11 +51,23 @@ export class Encounters {
     this.nextIndex = FIRST_AT
     this.last = null
     this.time = 0
-    this.rewards = [] // { gold, x, y } earned by clearing out raids
+    this.rewards = [] // { gold, x, y, message? } earned by clearing out raids
+    this.onNewZones = null // called with zones that appear where scenery already is
+    this.lastSideRoad = FIRST_SIDE_ROAD_BY - MAX_SIDE_ROAD_GAP // metres
   }
 
   get zones() {
-    return this.list.map((e) => e.zone)
+    return this.list.flatMap((e) => e.zones ?? [e.zone])
+  }
+
+  // Traders open for business (villages at the end of side roads).
+  get traders() {
+    return this.list.flatMap((e) => (e.traders ?? []).filter((t) => t.open))
+  }
+
+  // Is (x, y) on any side road?
+  onSideRoad(x, y) {
+    return this.list.some((e) => e.sideRoad && onSideRoad(e, x, y))
   }
 
   get obstacles() {
@@ -64,25 +84,45 @@ export class Encounters {
   place() {
     while (this.nextIndex < this.road.points.length - 5) {
       const i = this.nextIndex
+      // Raiders are as tough as the stretch of road they're found on.
+      const metres = (i * SEGMENT) / 20
+      const threat = threatAt(metres)
+      const { biome } = stageAt(metres)
+      this.enemies.threat = threat
       const ctx = {
         layer: this.layer,
         road: this.road,
         i,
-        difficulty: (i * SEGMENT) / 20 / 500, // +1 per 500 m
+        difficulty: metres / 500, // +1 per 500 m
+        extra: threat.extraMembers,
         enemies: this.enemies,
       }
-      // Never the same kind twice in a row.
-      let entry = pick(this.last)
-      let enc = entry.make(ctx)
+      // Now and then, a turning off to a village or a big camp. Its road
+      // runs back alongside existing road, so clear any trees already there.
+      let enc = null
+      let entry = null
+      const overdue = metres - this.lastSideRoad >= MAX_SIDE_ROAD_GAP
+      if (metres > SIDE_ROADS_FROM && (overdue || Math.random() < SIDE_ROAD_CHANCE)) {
+        enc = sideRoad({ ...ctx, zones: this.zones })
+        if (enc) {
+          this.onNewZones?.(enc.zones)
+          this.lastSideRoad = metres
+        }
+      }
       if (!enc) {
-        entry = FALLBACK[entry.faction]
+        // Never the same kind twice in a row.
+        entry = pick(this.last, biome)
         enc = entry.make(ctx)
+        if (!enc) {
+          entry = FALLBACK[entry.faction]
+          enc = entry.make(ctx)
+        }
       }
       enc.index = i
-      enc.kind = entry.kind
+      enc.kind = entry?.kind ?? 'sideRoad'
       this.list.push(enc)
-      this.last = entry
-      this.nextIndex += Math.floor(Math.max(32, 60 - i / 30) * rand(0.85, 1.2))
+      this.last = entry ?? this.last
+      this.nextIndex += Math.floor(threat.spacing * rand(0.85, 1.2))
     }
   }
 
@@ -107,6 +147,7 @@ export class Encounters {
     this.list = this.list.filter((enc) => {
       if (enc.index >= roadIndex - 70) return true
       enc.view.destroy({ children: true })
+      enc.roadViews?.forEach((v) => v.destroy())
       enc.members.forEach((m) => (m.removed = true))
       return false
     })

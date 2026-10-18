@@ -16,7 +16,12 @@ const ICONS = {
   legs: [{ d: 'M11 5 H29 V13 L26.5 35 H21.5 L20 17 L18.5 35 H13.5 L11 13 Z' }, { d: 'M11 10 H29', line: true, trim: true }],
   stone: [{ d: 'M13 22 Q12 13 20 12 Q29 12 28 21 Q28 29 20 29 Q13 29 13 22 Z' }],
   fist: [{ d: 'M11 14 Q11 10 15 10 H27 Q30 10 30 14 V24 Q30 31 23 31 H17 Q11 31 11 25 Z' }, { d: 'M17 10 V18 M23 10 V18', line: true }],
-  sling: [{ d: 'M8 5 Q20 30 32 5', line: true, wide: true }, { d: 'M15 27 Q20 35 25 27 Q20 31 15 27 Z' }],
+  sling: [
+    { d: 'M12 8 A3 3 0 1 1 12.1 8', line: true }, // finger loop
+    { d: 'M12 11 L20 27 M15 9 L26 25', line: true },
+    { d: 'M17 26 Q22 34 29 24 Q23 29 17 26 Z' },
+    { d: 'M21 27.5 A2.6 2.6 0 1 1 21.1 27.5 Z', color: '#9a968c' }, // the stone
+  ],
   bow: [{ d: 'M13 4 Q37 20 13 36', line: true, wide: true }, { d: 'M13 4 L13 36', line: true, trim: true }, { d: 'M8 20 H32 M28 17 L32 20 L28 23', line: true }],
   crossbow: [{ d: 'M20 9 V36', line: true, wide: true }, { d: 'M5 15 Q20 5 35 15', line: true, wide: true }, { d: 'M5 15 L20 19 L35 15', line: true, trim: true }],
   club: [{ d: 'M9 33 L12 36 L31 14 Q33 6 26 6 Z' }, { d: 'M24 12 L27 15 M27 9 L30 12', line: true, trim: true }],

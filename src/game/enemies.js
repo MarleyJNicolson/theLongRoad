@@ -6,6 +6,11 @@ export const TYPES = {
   goblin: { hp: 2, speed: 165, radius: 10, healthBar: true, leash: 650 },
   bandit: { hp: 2, speed: 125, radius: 13, healthBar: false, leash: 800 },
   captain: { hp: 4, speed: 115, radius: 15, healthBar: true, leash: 900 },
+  // Heavies, found in the big camps down side roads. `armour` is taken off
+  // every hit they take (always at least 1 gets through); `heavy` adds to
+  // the damage they deal.
+  orc: { hp: 7, speed: 118, radius: 17, healthBar: true, leash: 850, heavy: 1, faction: 'goblin' },
+  brute: { hp: 6, speed: 100, radius: 15, healthBar: true, leash: 900, heavy: 1, armour: 1, faction: 'bandit' },
 }
 
 const BAR_WIDTH = 22
@@ -56,19 +61,64 @@ function drawCaptain(body, arms) {
   arms[1].position.set(2, 13)
 }
 
-const DRAW = { goblin: drawGoblin, bandit: drawBandit, captain: drawCaptain }
+// Orc: hulking, grey-green, tusked, with a heavy cleaver.
+function drawOrc(body, arms) {
+  body.ellipse(3, 4, 15, 19).fill({ color: '#000', alpha: 0.22 })
+  body.ellipse(-2, 0, 11, 17).fill('#4a3a2a')
+  body.ellipse(-4, 0, 6, 15).fill('#5e4a34')
+  body.circle(3, 0, 9).fill('#5f7a4a')
+  body.circle(7, -4, 1.6).fill('#ffcf3a')
+  body.circle(7, 4, 1.6).fill('#ffcf3a')
+  body.poly([10, -4, 14, -6, 11, -2]).fill('#efe6cf')
+  body.poly([10, 4, 14, 6, 11, 2]).fill('#efe6cf')
+  arms[0].circle(0, 0, 4.5).fill('#5f7a4a')
+  arms[1].circle(0, 0, 4.5).fill('#5f7a4a')
+  arms[1].moveTo(0, 0).lineTo(12, 0).stroke({ width: 3, color: '#4a3220', cap: 'round' })
+  arms[1].poly([10, -2, 22, -5, 23, 4, 10, 3]).fill('#8a9096')
+  arms[0].position.set(3, -15)
+  arms[1].position.set(3, 15)
+}
+
+// Armoured bandit: steel plate, helm with a visor slit, shield and mace.
+function drawBrute(body, arms) {
+  body.ellipse(2, 3, 13, 16).fill({ color: '#000', alpha: 0.22 })
+  body.ellipse(-1, 0, 9, 13).fill('#7d8590')
+  body.moveTo(-8, -6).lineTo(6, -6).moveTo(-8, 6).lineTo(6, 6).stroke({ width: 1.5, color: '#5a6068' })
+  body.circle(1, 0, 7.5).fill('#a6aeb7')
+  body.rect(5, -4, 2, 8).fill('#2a2a2a')
+  arms[0].ellipse(4, 0, 4, 9).fill('#6e4a28').stroke({ width: 1.5, color: '#a6aeb7' })
+  arms[1].circle(0, 0, 3.5).fill('#7d8590')
+  arms[1].moveTo(0, 0).lineTo(14, 0).stroke({ width: 2.5, color: '#4a3220', cap: 'round' })
+  arms[1].circle(15, 0, 4).fill('#8a9096')
+  arms[0].position.set(4, -12)
+  arms[1].position.set(2, 12)
+}
+
+const DRAW = { goblin: drawGoblin, bandit: drawBandit, captain: drawCaptain, orc: drawOrc, brute: drawBrute }
 
 // A raider belongs to a home (camp or roadblock). It idles there until
 // alerted, chases the cart, and gives up once dragged too far from home.
 class Enemy {
-  constructor(layer, type, x, y, home) {
+  // `threat` (see threat.js) toughens raiders the further along the road
+  // they're found; some turn up as elites.
+  constructor(layer, type, x, y, home, threat = null) {
     Object.assign(this, TYPES[type])
     this.type = type
     this.x = x
     this.y = y
     this.vx = 0
     this.vy = 0
-    this.speed *= rand(0.85, 1.1)
+    this.speed *= rand(0.85, 1.1) * (threat?.speedMult ?? 1)
+    this.hp += threat?.hpBonus ?? 0
+    this.damage = (threat?.damage ?? 1) + (this.heavy ?? 0)
+    this.faction ??= type === 'goblin' ? 'goblin' : 'bandit'
+    this.elite = Math.random() < (threat?.eliteChance ?? 0)
+    if (this.elite) {
+      this.hp = Math.ceil(this.hp * 1.8)
+      this.radius = Math.round(this.radius * 1.2)
+      this.healthBar = true
+    }
+    this.gold = (this.elite ? 3 : 1) + (this.heavy ? 2 : 0)
     this.maxHp = this.hp
     this.home = home // { x, y, facing, wander?: { x, y, min, max } }
     this.state = 'idle'
@@ -91,6 +141,14 @@ class Enemy {
     this.arms = arms
     this.armBase = arms.map((a) => a.x)
     this.figure.addChild(arms[0], arms[1], body)
+    if (this.elite) {
+      // A smouldering red ring marks out the tough ones.
+      const aura = new Graphics()
+        .circle(0, 0, this.radius + 5).fill({ color: '#c0392b', alpha: 0.18 })
+        .circle(0, 0, this.radius + 5).stroke({ width: 2, color: '#e8b923', alpha: 0.8 })
+      this.figure.addChildAt(aura, 0)
+      this.figure.scale.set(1.2)
+    }
     this.figure.rotation = home.facing ?? 0
 
     this.bar = new Graphics()
@@ -211,13 +269,15 @@ class Enemy {
   }
 
   hit(dirX, dirY, damage = 1) {
-    this.hp -= damage
+    this.hp -= Math.max(1, damage - (this.armour ?? 0))
     this.provoked = true
     this.drawBar()
     if (!this.alive) this.bar.visible = false
     this.flash = 0.15
-    this.vx = dirX * 260
-    this.vy = dirY * 260
+    // Heavies barely budge.
+    const shove = this.heavy ? 90 : 260
+    this.vx = dirX * shove
+    this.vy = dirY * shove
   }
 }
 
@@ -225,6 +285,7 @@ export class Enemies {
   constructor(layer) {
     this.layer = layer
     this.list = []
+    this.threat = null // set by whoever is spawning (see Encounters.place)
   }
 
   get alive() {
@@ -232,7 +293,7 @@ export class Enemies {
   }
 
   add(type, x, y, home) {
-    const enemy = new Enemy(this.layer, type, x, y, home)
+    const enemy = new Enemy(this.layer, type, x, y, home, this.threat)
     this.list.push(enemy)
     return enemy
   }

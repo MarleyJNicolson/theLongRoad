@@ -9,6 +9,7 @@ const props = defineProps({
   armour: { type: Number, default: 0 },
   block: { type: Number, default: 0 },
   bagOpen: { type: Boolean, default: false },
+  active: { type: String, default: 'ranged' }, // weapon in hand
 })
 const emit = defineEmits(['unequip', 'toggle-bag'])
 
@@ -53,7 +54,12 @@ const ROWS = [
             v-if="slot"
             type="button"
             class="slot"
-            :class="{ empty: slots[slot].empty, weapon: slot === 'ranged' || slot === 'melee' }"
+            :class="{
+              empty: slots[slot].empty,
+              weapon: slot === 'ranged' || slot === 'melee',
+              'in-hand': slot === active,
+              stowed: (slot === 'ranged' || slot === 'melee') && slot !== active,
+            }"
             :style="{ borderColor: slots[slot].tier.edge }"
             @pointerenter="hovered = slot"
             @pointerleave="hovered = null"
@@ -61,6 +67,7 @@ const ROWS = [
           >
             <ItemIcon :item="slots[slot].shown" :silhouette="slot" />
             <span class="slot-label">{{ slots[slot].label.split(' ')[0] }}</span>
+            <span v-if="slot === active" class="hand-badge">In hand</span>
           </button>
           <button
             v-else-if="r === 0 && c === 2"
@@ -78,6 +85,7 @@ const ROWS = [
             </svg>
             <span class="slot-label">Bag (B)</span>
           </button>
+          <div v-else-if="r === 3 && c === 1" class="swap-hint">⇄<br />Q</div>
           <div v-else class="gap"></div>
         </template>
       </template>
@@ -155,6 +163,39 @@ const ROWS = [
 
 .slot.weapon {
   background: rgba(60, 40, 20, 0.55);
+}
+
+.slot.in-hand {
+  box-shadow: 0 0 0 2px #fff4d6, 0 0 10px rgba(255, 244, 214, 0.5);
+}
+
+.slot.stowed :deep(svg) {
+  opacity: 0.45;
+}
+
+.hand-badge {
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #fff4d6;
+  color: #3a2a1a;
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 4px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.swap-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.3;
+  opacity: 0.6;
 }
 
 .bag-button {
