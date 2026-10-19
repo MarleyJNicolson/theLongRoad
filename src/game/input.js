@@ -48,6 +48,8 @@ export class Input {
     canvas.addEventListener('contextmenu', this.onContextMenu)
     window.addEventListener('pointerup', this.onPointerUp)
     this.onDown = (e) => {
+      // Typing in a text box (your name on the scoreboard) isn't for the game
+      if (e.target.closest?.('input, textarea')) return
       if (!e.repeat) this.justPressed.add(e.code)
       this.held.add(e.code)
       // Our keys shouldn't scroll or trigger browser shortcuts (Ctrl+S, Ctrl+D...;

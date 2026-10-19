@@ -88,6 +88,7 @@ export class Rig {
     this.kick = 0 // bow recoil
     this.flinch = 0
     this.ragdoll = null
+    this.stuck = [] // arrows and bolts sticking out of it
   }
 
   get height() {
@@ -139,6 +140,41 @@ export class Rig {
     ].map(([p, q]) => [parts[p], parts[q], Math.hypot(parts[p].x - parts[q].x, parts[p].y - parts[q].y, parts[p].z - parts[q].z)])
     this.ragdoll = { parts, sticks, t: 0, weapon: this.weapon, offhand: this.offhand }
     this.move = this.strike = this.trail = null
+  }
+
+  // An arrow or bolt flying along (dirX, dirY) sticks in somewhere on the
+  // body and stays there, through death and all.
+  stickShaft(dirX, dirY, kind = 'arrow') {
+    const spots = [
+      ['neck', 'hipL', 0.2, 0.7], ['neck', 'hipR', 0.2, 0.7], ['neck', 'hipL', 0.3, 0.6], // the trunk, most of all
+      ['shL', 'elbL', 0.2, 0.8], ['shR', 'elbR', 0.2, 0.8],
+      ['hipL', 'kneeL', 0.2, 0.8], ['hipR', 'kneeR', 0.2, 0.8],
+    ]
+    const [a, b, lo, hi] = spots[Math.floor(Math.random() * spots.length)]
+    this.stuck.push({
+      a,
+      b,
+      t: lo + Math.random() * (hi - lo),
+      rel: Math.atan2(dirY, dirX) - this.facing + (Math.random() - 0.5) * 0.5, // which way it came, relative to the body
+      tilt: Math.random() * 0.5,
+      kind,
+    })
+    if (this.stuck.length > 8) this.stuck.shift()
+  }
+
+  drawShaft(g, pts, s) {
+    const k = this.k
+    const p = { x: lerp(pts[s.a].x, pts[s.b].x, s.t), y: lerp(pts[s.a].y, pts[s.b].y, s.t) }
+    const ang = this.facing + s.rel
+    // What shows is the back end, pointing back the way it came
+    const len = (s.kind === 'bolt' ? 5 : 8) * k
+    const end = { x: p.x - Math.cos(ang) * len, y: p.y - Math.sin(ang) * len - s.tilt * len }
+    g.moveTo(p.x, p.y).lineTo(end.x, end.y).stroke({ width: 1.2 * k, color: s.kind === 'bolt' ? '#5e3f22' : '#8b6236', cap: 'round' })
+    const feather = s.kind === 'bolt' ? '#5e3f22' : '#e8e0c8'
+    const nx = -Math.sin(ang) * 1.6 * k
+    const ny = Math.cos(ang) * 0.8 * k
+    const back = { x: end.x + Math.cos(ang) * 2.5 * k, y: end.y + Math.sin(ang) * 2.5 * k }
+    g.poly([end.x, end.y, back.x + nx, back.y + ny, back.x - nx, back.y - ny]).fill(feather)
   }
 
   // Where the weapon is, as points on the ground relative to the figure, from
@@ -453,6 +489,11 @@ export class Rig {
     if (weaponLine) parts.push({ d: pts.handR.d + 0.02, draw: weaponLine })
     const off = this.offhand && (this.ragdoll ? this.ragdoll.offhand : this.offhand)
     if (off) parts.push({ d: pts.handL.d + 0.02, draw: () => this.drawOffhand(g, pts, off) })
+
+    for (const s of this.stuck) {
+      const d = lerp(pts[s.a].d, pts[s.b].d, s.t) - Math.sin(this.facing + s.rel) * 2
+      parts.push({ d, draw: () => this.drawShaft(g, pts, s) })
+    }
 
     parts.sort((p, q) => p.d - q.d)
     for (const p of parts) p.draw()

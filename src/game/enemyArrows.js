@@ -1,4 +1,4 @@
-import { Graphics } from 'pixi.js'
+import { Container, Graphics } from 'pixi.js'
 
 // Arrows loosed by enemy archers. They fly flat and fairly slowly, so you
 // can dodge them, and they thud into any tree or building in the way.
@@ -12,12 +12,19 @@ export class EnemyArrows {
     const dx = aimX - x
     const dy = aimY - y
     const len = Math.hypot(dx, dy) || 1
-    const g = new Graphics()
-    g.moveTo(-9, 0).lineTo(9, 0).stroke({ width: 2, color: '#5e3f22', cap: 'round' })
-    g.poly([13, 0, 8, -3, 8, 3]).fill('#9aa3ad')
-    g.poly([-9, 0, -13, -3.5, -6, 0, -13, 3.5]).fill(faction === 'goblin' ? '#6fa83a' : '#c0392b')
+    // Drawn the size of the one on the archer's bow, flying at chest height
+    // over its shadow
+    const g = new Container()
+    const shadow = new Graphics().moveTo(-7, 0).lineTo(8, 0).stroke({ width: 1.5, color: '#000', alpha: 0.2, cap: 'round' })
+    const shaft = new Graphics()
+    shaft.moveTo(-6.5, 0).lineTo(6.5, 0).stroke({ width: 1.3, color: '#5e3f22', cap: 'round' })
+    shaft.poly([9.5, 0, 6, -1.6, 6, 1.6]).fill('#9aa3ad')
+    shaft.poly([-6.5, 0, -9.5, -2.2, -4, 0, -9.5, 2.2]).fill(faction === 'goblin' ? '#6fa83a' : '#c0392b')
+    const angle = Math.atan2(dy, dx)
+    shadow.rotation = shaft.rotation = angle
+    shaft.y = -14
+    g.addChild(shadow, shaft)
     g.position.set(x, y)
-    g.rotation = Math.atan2(dy, dx)
     this.layer.addChild(g)
     this.list.push({ g, x, y, vx: (dx / len) * speed, vy: (dy / len) * speed, left: range, damage, faction, stuck: 0, flown: 0 })
   }
@@ -49,7 +56,7 @@ export class EnemyArrows {
     }
     this.list = this.list.filter((a) => {
       if (a.stuck < 1.2) return true
-      a.g.destroy()
+      a.g.destroy({ children: true })
       return false
     })
     return hits

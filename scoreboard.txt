@@ -1,0 +1,6 @@
+SCOREBOARD
+Score = metres travelled + 20 per raider felled + 5 per gold piece
+
+Rank | Name | Score | Distance | Felled | Gold | Region                | Fate      | Date            
+-----+------+-------+----------+--------+------+-----------------------+-----------+-----------------
+   1 | Mars |  5570 |   1795 m |    125 |  255 | The Meadows (stage 1) | Shot down | 2026-10-19 18:56

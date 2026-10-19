@@ -29,6 +29,10 @@ const CAMERA_MARGIN = 90 // closest the player gets to the screen edge
 const LOOT_REACH = 34 // how close to stand to search a container
 const MOUNT_REACH = 48 // how close to the cart to climb back on
 const TOAST_TIME = 1.8
+// On foot you can't stray too far from the cart: a warning past WARN_DISTANCE
+// and no further than LEASH (px)
+const WARN_DISTANCE = 700
+const LEASH = 860
 // The peasant's own stamina (the horse has its own): sprinting drains it,
 // a dash takes a chunk at once, and it comes back after a short rest.
 const SPRINT_DRAIN = 1 / 4.5 // a full bar lasts 4.5 s of sprinting
@@ -80,6 +84,8 @@ export class Game {
   }
 
   reset() {
+    // Restarting without signing still puts the run on the board
+    if (this.unsaved) this.saveRun(this.lastName ?? '')
     this.world.removeChildren().forEach((c) => c.destroy({ children: true }))
 
     const ground = new Container()
@@ -161,7 +167,7 @@ export class Game {
 
   update(dt) {
     if (this.state === 'over') {
-      if (this.input.is('restart')) this.reset()
+      if (this.input.pressed('restart')) this.reset()
       this.input.endFrame()
       return
     }
@@ -203,6 +209,7 @@ export class Game {
       const cartSolids = this.cart.bodies().map((b) => ({ x: b.x, y: b.y, radius: b.r }))
       const sprinting = this.updateBreath(dt, keys)
       this.peasant.update(dt, keys, aim.x, aim.y, [...obstacles, ...cartSolids], sprinting)
+      this.keepNearCart()
       if (this.peasant.dashing && Math.random() < 0.6) this.puff(this.peasant.x, this.peasant.y)
     }
 
@@ -287,6 +294,7 @@ export class Game {
       prompt: this.interaction()?.label ?? '',
       toast: this.toast?.text ?? '',
       over: this.state === 'over',
+      tether: this.tetherView(),
       overTitle: this.overReason.title,
       overText: this.overReason.text,
     })
@@ -1070,6 +1078,56 @@ export class Game {
     }
   }
 
+  // Hold the peasant on foot within LEASH of the cart.
+  keepNearCart() {
+    const p = this.peasant
+    const dx = p.x - this.cart.cartX
+    const dy = p.y - this.cart.cartY
+    const d = Math.hypot(dx, dy)
+    if (d <= LEASH) return
+    const ux = dx / d
+    const uy = dy / d
+    p.x = this.cart.cartX + ux * LEASH
+    p.y = this.cart.cartY + uy * LEASH
+    // Lose only the outward part of the step, so you can slide along the edge
+    const out = p.vx * ux + p.vy * uy
+    if (out > 0) {
+      p.vx -= ux * out
+      p.vy -= uy * out
+    }
+  }
+
+  // On foot: a warning when straying too far, and an arrow at the screen
+  // edge pointing back to the cart whenever it's out of sight (screen px).
+  tetherView() {
+    if (!this.onFoot || this.state === 'over') return null
+    const d = Math.hypot(this.peasant.x - this.cart.cartX, this.peasant.y - this.cart.cartY)
+    const c = { x: this.cart.cartX, y: this.cart.cartY - 20 } // point at the cart, not its wheels
+    const zoom = this.world.scale.x
+    const sx = this.world.x + c.x * zoom
+    const sy = this.world.y + c.y * zoom
+    const { width: W, height: H } = this.app.screen
+    // Keep clear of the HUD along the top and bottom
+    const box = { left: 48, right: W - 48, top: 110, bottom: H - 110 }
+    const offScreen = sx < box.left || sx > box.right || sy < box.top || sy > box.bottom
+    const warn = d > WARN_DISTANCE
+    if (!offScreen && !warn) return null
+    let arrow = null
+    if (offScreen) {
+      // Where the line from the middle of the screen to the cart leaves the box
+      const mx = W / 2
+      const my = (box.top + box.bottom) / 2
+      const dx = sx - mx
+      const dy = sy - my
+      const k = Math.min(
+        dx > 0 ? (box.right - mx) / dx : dx < 0 ? (box.left - mx) / dx : Infinity,
+        dy > 0 ? (box.bottom - my) / dy : dy < 0 ? (box.top - my) / dy : Infinity,
+      )
+      arrow = { x: Math.round(mx + dx * k), y: Math.round(my + dy * k), angle: Math.round((Math.atan2(dy, dx) * 180) / Math.PI) }
+    }
+    return { warn, atLimit: d > LEASH - 10, metres: Math.round(d / PX_PER_METRE), arrow }
+  }
+
   end(title, text) {
     if (this.state === 'over') return
     this.state = 'over'
@@ -1077,6 +1135,33 @@ export class Game {
     this.overReason = { title, text }
     this.aim.clear()
     this.marker.clear()
+    // Held until you sign your name to it (see saveRun)
+    this.unsaved = {
+      distance: Math.floor(this.best / PX_PER_METRE),
+      kills: this.kills,
+      gold: this.gold,
+      region: `${this.stage.name} (stage ${this.stage.number})`,
+      fate: title,
+    }
+    this.onHud({ scoreboard: { naming: true } })
+  }
+
+  // Put the finished run on the scoreboard under `name` (a text file kept by
+  // the dev server; see scoreboard.js) and show where it placed.
+  async saveRun(name) {
+    const run = this.unsaved
+    if (!run) return
+    this.unsaved = null
+    run.name = name.trim() || 'Anonymous'
+    this.onHud({ scoreboard: { pending: true } })
+    try {
+      const res = await fetch('/api/scores', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(run) })
+      if (!res.ok) throw new Error(res.statusText)
+      const { rank, entry, top } = await res.json()
+      this.onHud({ scoreboard: { rank, score: entry.score, top } })
+    } catch {
+      this.onHud({ scoreboard: { error: true } })
+    }
   }
 
   updateCamera(dt) {

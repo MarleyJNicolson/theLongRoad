@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted, reactive, useTemplateRef } from 'vue'
+import { onMounted, onUnmounted, reactive, ref, useTemplateRef } from 'vue'
 import { Application } from 'pixi.js'
 import { Game } from '../game/Game.js'
 import { PIXEL_SIZE, createPixelArtFilter } from '../game/pixelArt.js'
@@ -48,10 +48,31 @@ const hud = reactive({
   over: false,
   overTitle: '',
   overText: '',
+  scoreboard: null,
 })
 let app
 let game
 let resizeObserver
+
+// Your name for the scoreboard, remembered for next time on this browser
+const NAME_KEY = 'scoreboard-name'
+const playerName = ref('')
+try {
+  playerName.value = localStorage.getItem(NAME_KEY) ?? ''
+} catch {}
+
+function signRun() {
+  const name = playerName.value.trim()
+  try {
+    if (name) localStorage.setItem(NAME_KEY, name)
+  } catch {}
+  game.lastName = name
+  game.saveRun(name)
+  document.activeElement?.blur() // so Space goes back to the game (to try again)
+}
+
+// Focus the name box as soon as it appears
+const vFocus = { mounted: (el) => el.focus() }
 
 onMounted(async () => {
   app = new Application()
@@ -88,6 +109,7 @@ onMounted(async () => {
   app.stage.filters = [createPixelArtFilter()]
   app.stage.filterArea = app.screen
   game = new Game(app, (state) => Object.assign(hud, state))
+  game.lastName = playerName.value.trim()
 })
 
 onUnmounted(() => {
@@ -205,12 +227,50 @@ onUnmounted(() => {
     </template>
   </div>
 
+  <div
+    v-if="hud.tether?.arrow && !hud.over"
+    class="cart-arrow"
+    :class="{ warn: hud.tether.warn }"
+    :style="{ left: hud.tether.arrow.x + 'px', top: hud.tether.arrow.y + 'px' }"
+  >
+    <div class="pointer" :style="{ transform: `rotate(${hud.tether.arrow.angle}deg)` }"></div>
+    <span>Cart · {{ hud.tether.metres }} m</span>
+  </div>
+  <div v-if="hud.tether?.warn && !hud.over" class="tether-warning">
+    {{ hud.tether.atLimit ? 'You can go no further from your cart' : 'You are straying too far from your cart' }} – head back!
+  </div>
+
   <div v-if="hud.over" class="overlay">
     <h1>{{ hud.overTitle }}</h1>
     <p class="reached">You reached {{ hud.stage }} – stage {{ hud.stageNumber }}</p>
     <p>You travelled {{ hud.distance }} m and felled {{ hud.kills }} raiders before {{ hud.overText }}.</p>
     <p>{{ hud.gold }} gold was lost along with everything else.</p>
-    <p class="hint">Press Space to try again</p>
+    <div v-if="hud.scoreboard" class="scores">
+      <form v-if="hud.scoreboard.naming" class="sign" @submit.prevent="signRun">
+        <label for="run-name">Sign the scoreboard</label>
+        <input id="run-name" v-model="playerName" v-focus maxlength="20" placeholder="Your name" autocomplete="off" @keydown.enter.prevent="signRun" />
+        <button type="submit">Save</button>
+      </form>
+      <p v-else-if="hud.scoreboard.pending">Writing your run on the scoreboard…</p>
+      <p v-else-if="hud.scoreboard.error">The scoreboard couldn't be reached.</p>
+      <template v-else>
+        <p class="score">
+          Score {{ hud.scoreboard.score }}
+          <span v-if="hud.scoreboard.rank"> · #{{ hud.scoreboard.rank }} on the board</span>
+        </p>
+        <table>
+          <tr v-for="(run, k) in hud.scoreboard.top.slice(0, 5)" :key="k" :class="{ you: k + 1 === hud.scoreboard.rank }">
+            <td>{{ k + 1 }}.</td>
+            <td>{{ run.name }}</td>
+            <td class="num">{{ run.score }}</td>
+            <td>{{ run.distance }} m</td>
+            <td>{{ run.kills }} felled</td>
+            <td>{{ run.region }}</td>
+          </tr>
+        </table>
+      </template>
+    </div>
+    <p class="hint">{{ hud.scoreboard?.naming ? 'Enter to save · click away and press Space to try again' : 'Press Space to try again' }}</p>
   </div>
 </template>
 
@@ -478,6 +538,63 @@ onUnmounted(() => {
   font-size: 18px;
 }
 
+.cart-arrow {
+  position: fixed;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-family: var(--font-ui);
+  font-size: 15px;
+  color: #f3e3c0;
+  text-shadow: 0 1px 0 #1c1714, 0 -1px 0 #1c1714, 1px 0 0 #1c1714, -1px 0 0 #1c1714;
+}
+
+/* A chunky arrowhead pointing right, turned towards the cart */
+.cart-arrow .pointer {
+  width: 0;
+  height: 0;
+  border-top: 16px solid transparent;
+  border-bottom: 16px solid transparent;
+  border-left: 30px solid #e8b923;
+  filter: drop-shadow(0 0 0 #1c1714) drop-shadow(2px 2px 0 #1c1714);
+}
+
+.cart-arrow.warn .pointer {
+  border-left-color: #e0463a;
+  animation: tether-pulse 0.6s ease-in-out infinite alternate;
+}
+
+.cart-arrow.warn span {
+  color: #ffb3a8;
+}
+
+.tether-warning {
+  position: fixed;
+  top: 96px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 16px;
+  font-family: var(--font-ui);
+  font-size: 16px;
+  color: #ffe2d8;
+  background: rgba(90, 24, 16, 0.85);
+  border: 2px solid #e0463a;
+  pointer-events: none;
+  animation: tether-pulse 0.6s ease-in-out infinite alternate;
+}
+
+@keyframes tether-pulse {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.55;
+  }
+}
+
 .overlay {
   position: fixed;
   inset: 0;
@@ -497,6 +614,67 @@ onUnmounted(() => {
   font-size: 72px;
   font-weight: normal;
   color: #cf5528;
+}
+
+.overlay .scores {
+  margin-top: 8px;
+  padding: 10px 18px;
+  background: rgba(20, 14, 8, 0.6);
+  border: 2px solid #5e4a33;
+}
+
+.overlay .sign {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.overlay .sign input {
+  font: inherit;
+  font-size: 18px;
+  width: 220px;
+  padding: 4px 8px;
+  color: #2a1f14;
+  background: #f3e3c0;
+  border: 2px solid #5e4a33;
+  outline: none;
+}
+
+.overlay .sign input:focus {
+  border-color: #ffd75e;
+}
+
+.overlay .sign button {
+  font: inherit;
+  padding: 4px 14px;
+  color: #2a1f14;
+  background: #d4a32a;
+  border: 2px solid #5e3f22;
+  cursor: pointer;
+}
+
+.overlay .score {
+  font-size: 22px;
+  color: #ffd75e;
+  margin-bottom: 6px;
+}
+
+.overlay table {
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.overlay td {
+  padding: 2px 10px;
+  text-align: left;
+}
+
+.overlay td.num {
+  text-align: right;
+}
+
+.overlay tr.you {
+  color: #ffd75e;
 }
 
 .overlay .hint {
