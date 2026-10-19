@@ -2,6 +2,9 @@ import { Container } from 'pixi.js'
 import { Rig } from './rig.js'
 
 const WALK_SPEED = 120
+const SPRINT_SPEED = 195
+const DASH_SPEED = 430
+export const DASH_TIME = 0.17 // seconds of dash (about 70 px)
 export const PEASANT_RADIUS = 8
 
 // Equipped items drawn in the peasant's hands (rig.js weapon names).
@@ -18,6 +21,7 @@ export class Peasant {
     this.vx = 0
     this.vy = 0
     this.facing = 0
+    this.dashT = 0
 
     this.rig = new Rig({ skin: '#d9b08c', shirt: '#6b5b3e', legs: '#4a3a2b', head: 'straw' })
     this.view = new Container()
@@ -32,10 +36,12 @@ export class Peasant {
       play: (move, opts) => rig.play(move, opts),
     }
     this.bow = {
-      set: (item, loaded) => {
+      // `draw`: how far the next shot has been drawn back (0..1)
+      set: (item, loaded, draw = 1) => {
         rig.offhand = RANGED[item?.icon] ?? null
         rig.loaded = loaded
         rig.aiming = !!rig.offhand
+        rig.pull = draw
       },
       fire: () => rig.loose(),
     }
@@ -57,13 +63,31 @@ export class Peasant {
     this.view.visible = false
   }
 
-  update(dt, input, aimX, aimY, obstacles) {
+  // A quick burst along (dx, dy); steering is ignored until it's over.
+  dash(dx, dy) {
+    const len = Math.hypot(dx, dy) || 1
+    this.vx = (dx / len) * DASH_SPEED
+    this.vy = (dy / len) * DASH_SPEED
+    this.dashT = DASH_TIME
+  }
+
+  get dashing() {
+    return this.dashT > 0
+  }
+
+  update(dt, input, aimX, aimY, obstacles, sprinting = false) {
     const mx = (input.right ? 1 : 0) - (input.left ? 1 : 0)
     const my = (input.down ? 1 : 0) - (input.up ? 1 : 0)
     const len = Math.hypot(mx, my) || 1
-    const k = 1 - Math.exp(-dt * 12)
-    this.vx += ((mx / len) * WALK_SPEED - this.vx) * k
-    this.vy += ((my / len) * WALK_SPEED - this.vy) * k
+    if (this.dashT > 0) {
+      this.dashT -= dt
+    } else {
+      const top = sprinting ? SPRINT_SPEED : WALK_SPEED
+      const k = 1 - Math.exp(-dt * 12)
+      this.vx += ((mx / len) * top - this.vx) * k
+      this.vy += ((my / len) * top - this.vy) * k
+    }
+    this.rig.lean = this.dashT > 0 ? 1 : sprinting && (mx || my) ? 0.6 : 0
     this.x += this.vx * dt
     this.y += this.vy * dt
 

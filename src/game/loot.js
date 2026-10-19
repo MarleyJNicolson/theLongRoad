@@ -1,4 +1,5 @@
 import { Graphics } from 'pixi.js'
+import { crate, barrel as drawBarrel, chest as drawChest } from './structures.js'
 
 // Chance that a point of interest has a treasure chest to search.
 export const CHEST_CHANCE = 0.5
@@ -17,60 +18,23 @@ function rollChest() {
   }
 }
 
-function drawCrate(g, size) {
-  const h = size / 2
-  g.rect(-h + 3, -h + 3, size, size).fill({ color: '#000', alpha: 0.2 })
-  g.rect(-h, -h, size, size).fill('#8b6236').stroke({ width: 2, color: '#5e3f22' })
-  g.moveTo(-h, -h).lineTo(h, h).stroke({ width: 1.5, color: '#5e3f22' })
-}
-
-function drawBarrel(g, r) {
-  g.circle(2, 2, r).fill({ color: '#000', alpha: 0.2 })
-  g.circle(0, 0, r).fill('#6e4a28')
-  g.circle(0, 0, r * 0.65).stroke({ width: 2, color: '#3a2a1a' })
-}
-
-// Iron-banded treasure chest with a gold lock; open, the lid is thrown back.
-function drawChest(g, open) {
-  g.roundRect(-11, -6, 26, 18, 3).fill({ color: '#000', alpha: 0.25 })
-  if (open) {
-    g.roundRect(-13, -20, 26, 10, 3).fill('#5e3f22').stroke({ width: 2, color: '#d4a32a' })
-  }
-  g.roundRect(-13, -9, 26, 18, 3).fill('#7a4a22').stroke({ width: 2.5, color: '#d4a32a' })
-  if (open) {
-    g.roundRect(-10, -6, 20, 12, 2).fill('#2a1f14')
-    g.circle(-3, 0, 2.5).fill('#e8b923').circle(3, 1, 2.5).fill('#e8b923')
-  } else {
-    g.moveTo(-13, -2).lineTo(13, -2).stroke({ width: 2, color: '#d4a32a' })
-    for (const x of [-7, 7]) g.moveTo(x, -9).lineTo(x, 9)
-    g.stroke({ width: 2, color: '#3a3a3a' })
-    g.roundRect(-3, -4, 6, 6, 1).fill('#ffd75e')
-    g.circle(0, 0, 1).fill('#3a2a1a')
-  }
-}
-
-// Crates and barrels are just set dressing.
-export function addProp(view, kind, x, y, size) {
-  const g = new Graphics()
-  g.position.set(x, y)
-  kind === 'crate' ? drawCrate(g, size ?? 18) : drawBarrel(g, size ?? 9)
-  view.addChild(g)
-  return g
+// Crates and barrels are just set dressing. `stand` puts something upright
+// on the map (see Encounters.place).
+export function addProp(stand, kind, x, y, size) {
+  const g = kind === 'crate' ? crate(size ?? 18) : drawBarrel(size ?? 9).g
+  return stand(g, x, y)
 }
 
 // Maybe place a treasure chest here (CHEST_CHANCE unless told otherwise). If placed, it's added
-// to `view` and to the encounter's `list` of loot.
-export function maybeAddChest(list, view, x, y, chance = CHEST_CHANCE) {
+// to the map and to the encounter's `list` of loot.
+export function maybeAddChest(list, stand, x, y, chance = CHEST_CHANCE) {
   if (Math.random() >= chance) return null
 
-  const g = new Graphics()
-  g.position.set(x, y)
-  drawChest(g, false)
+  const g = stand(drawChest(false), x, y)
   const glint = new Graphics()
     .moveTo(-4, 0).lineTo(4, 0).moveTo(0, -4).lineTo(0, 4)
     .stroke({ width: 1.5, color: '#fff8d0', cap: 'round' })
-  glint.position.set(x + 9, y - 8)
-  view.addChild(g, glint)
+  stand(glint, x + 9, y - 14, { depth: y + 0.5 })
 
   const chest = {
     kind: 'chest',
@@ -86,8 +50,7 @@ export function maybeAddChest(list, view, x, y, chance = CHEST_CHANCE) {
     // Search it: returns what was inside, e.g. { gold: 4, health: 1, repair: 0 }.
     open() {
       chest.opened = true
-      g.clear()
-      drawChest(g, true)
+      drawChest(true, g.clear())
       return rollChest()
     },
   }
@@ -97,10 +60,8 @@ export function maybeAddChest(list, view, x, y, chance = CHEST_CHANCE) {
 
 // A barrel of arrows kept by a camp's archers (and the odd bundle of bolts).
 // Whatever doesn't fit in your bag stays in it for later.
-export function addArrowBarrel(list, view, x, y) {
-  const g = new Graphics()
-  g.position.set(x, y)
-  view.addChild(g)
+export function addArrowBarrel(list, stand, x, y) {
+  const g = stand(new Graphics(), x, y)
   const barrel = {
     kind: 'arrows',
     x,
@@ -111,21 +72,18 @@ export function addArrowBarrel(list, view, x, y) {
     update() {
       const { arrows, bolts } = barrel.contents
       barrel.opened = !arrows && !bolts
-      g.clear()
-      g.circle(2, 2, 10).fill({ color: '#000', alpha: 0.2 })
-      g.circle(0, 0, 10).fill('#6e4a28')
-      g.circle(0, 0, 7).stroke({ width: 2, color: '#3a2a1a' })
-      g.circle(0, 0, 6).fill('#2a1f14')
+      const { top } = drawBarrel(10, g.clear())
+      g.ellipse(0, -top, 6.5, 2.8).fill('#2a1f14')
       // Fletchings poking out of the top
       const shafts = Math.min(7, Math.ceil(arrows / 3))
       for (let k = 0; k < shafts; k++) {
         const a = (k / Math.max(1, shafts)) * Math.PI * 2
         const fx = Math.cos(a) * 3.5
-        const fy = Math.sin(a) * 3.5
-        g.moveTo(fx, fy).lineTo(fx * 1.6, fy * 1.6 - 3).stroke({ width: 1.5, color: '#8b6236' })
-        g.circle(fx * 1.6, fy * 1.6 - 3, 1.6).fill(k % 2 ? '#e8e0c8' : '#a3331f')
+        const fy = Math.sin(a) * 1.5 - top
+        g.moveTo(fx, fy).lineTo(fx * 1.5, fy - 8).stroke({ width: 1.5, color: '#8b6236' })
+        g.circle(fx * 1.5, fy - 8, 1.6).fill(k % 2 ? '#e8e0c8' : '#a3331f')
       }
-      if (bolts) g.rect(-2, -2, 4, 4).fill('#5e3f22')
+      if (bolts) g.rect(-2, -top - 3, 4, 4).fill('#5e3f22')
     },
     animate() {},
   }

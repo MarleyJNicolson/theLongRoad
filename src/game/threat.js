@@ -26,7 +26,7 @@ export const BIOMES = [
     leaf: '#2f6530',
     bush: ['#2f5a28', '#356530', '#294f24'],
     grass: '#356a2c',
-    weights: { goblinCamp: 1.8, goblinBurrows: 1.8, goblinLooters: 1.5, goblinHouseRaid: 1.2, banditCamp: 0.5, banditRoadblock: 0.5, banditAmbush: 0.6, banditHouseRaid: 0.4 },
+    weights: { goblinCamp: 1.8, goblinBurrows: 1.8, goblinLooters: 1.5, goblinHouseRaid: 1.2, goblinLure: 1.6, banditLure: 0.5, banditCamp: 0.5, banditRoadblock: 0.5, banditAmbush: 0.6, banditHouseRaid: 0.4 },
   },
   {
     name: 'The Barrens',
@@ -37,7 +37,7 @@ export const BIOMES = [
     leaf: '#8a9448',
     bush: ['#8a8a48', '#7d7d40', '#96904e'],
     grass: '#8c8442',
-    weights: { banditCamp: 1.8, banditRoadblock: 1.6, banditAmbush: 1.5, banditHouseRaid: 1.3, goblinCamp: 0.5, goblinBurrows: 0.5, goblinLooters: 0.6, goblinHouseRaid: 0.4 },
+    weights: { banditCamp: 1.8, banditRoadblock: 1.6, banditAmbush: 1.5, banditHouseRaid: 1.3, banditLure: 1.6, goblinLure: 0.5, goblinCamp: 0.5, goblinBurrows: 0.5, goblinLooters: 0.6, goblinHouseRaid: 0.4 },
   },
   {
     name: 'The Frostmarch',

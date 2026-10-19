@@ -21,6 +21,9 @@ const hud = reactive({
   maxCartHealth: 10,
   stamina: 1,
   winded: false,
+  breath: 1,
+  outOfBreath: false,
+  sprinting: false,
   galloping: false,
   equipment: [],
   bare: {},
@@ -117,8 +120,14 @@ onUnmounted(() => {
         <i v-for="i in hud.maxCartHealth - 1" :key="'c' + i" class="tick" :style="{ left: (i / hud.maxCartHealth) * 100 + '%' }"></i>
       </div>
     </div>
-    <div class="row">
+    <div class="row" :class="{ active: hud.onFoot }">
       <label>Stamina</label>
+      <div class="bar stamina-bar" :class="{ winded: hud.outOfBreath, galloping: hud.sprinting }">
+        <div class="fill" :style="{ width: hud.breath * 100 + '%' }"></div>
+      </div>
+    </div>
+    <div class="row" :class="{ active: !hud.onFoot }">
+      <label>Horse</label>
       <div class="bar stamina-bar" :class="{ winded: hud.winded, galloping: hud.galloping }">
         <div class="fill" :style="{ width: hud.stamina * 100 + '%' }"></div>
       </div>
@@ -189,7 +198,7 @@ onUnmounted(() => {
 
   <div class="controls">
     <template v-if="hud.onFoot">
-      WASD – walk &nbsp;·&nbsp; E – open chest / climb on &nbsp;·&nbsp; Click – attack &nbsp;·&nbsp; Q / right-click – switch weapon &nbsp;·&nbsp; B – bag &nbsp;·&nbsp; C – cart storage
+      WASD – walk &nbsp;·&nbsp; Shift – sprint &nbsp;·&nbsp; Ctrl / Space – dash &nbsp;·&nbsp; E – open chest / climb on &nbsp;·&nbsp; Click – attack &nbsp;·&nbsp; Q / right-click – switch weapon &nbsp;·&nbsp; B – bag &nbsp;·&nbsp; C – cart storage
     </template>
     <template v-else>
       W / S – faster / slower &nbsp;·&nbsp; Shift – gallop &nbsp;·&nbsp; A / D – steer &nbsp;·&nbsp; E – get off &nbsp;·&nbsp; Click – attack &nbsp;·&nbsp; Q / right-click – switch weapon &nbsp;·&nbsp; B – bag &nbsp;·&nbsp; C – cart storage

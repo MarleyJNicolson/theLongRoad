@@ -1,137 +1,195 @@
 import { Container, Graphics } from 'pixi.js'
 import { ROAD_WIDTH, SEGMENT } from './road.js'
 import { BIOMES, stageAt } from './threat.js'
+import { box, drawSolid } from './iso.js'
 
 const rand = (min, max) => min + Math.random() * (max - min)
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
-const shadow = (g, r, alpha = 0.2) => g.ellipse(r * 0.3, r * 0.35, r, r * 0.82).fill({ color: '#000', alpha })
+// A shadow on the ground, cast down and to the right (the light is from the
+// top left), under something standing at the origin.
+const shadow = (g, w, h, alpha = 0.22) => g.ellipse(w * 0.3, h * 0.15, w, h).fill({ color: '#000', alpha })
 
 const SPREAD = 950 // how far from the road the land is dressed
 const ATTEMPTS = 5 // tries per side for each stretch of road
 
+// Everything standing up is drawn in three-quarter view like the people:
+// its base sits at the origin (where it meets the ground) and it rises up
+// the screen. Draw functions return the Graphics plus how tall it is.
+
 // --- Trees -----------------------------------------------------------------
 
-// Broad, lumpy oak canopy.
+const BARK = '#5c4632'
+const BARK_SHADE = '#46352a'
+
+// A trunk rising from the ground, flared at the roots, shaded on the right.
+function trunk(g, width, height, colour = BARK, shade = BARK_SHADE) {
+  g.poly([-width, 0, -width * 0.65, -height, width * 0.65, -height, width, 0]).fill(colour)
+  g.poly([width * 0.15, 0, width * 0.2, -height, width * 0.65, -height, width, 0]).fill(shade)
+  for (const s of [-1, 1]) g.poly([s * width * 0.6, 0, s * width * 1.7, 1.5, s * width * 0.9, -width * 0.8]).fill(colour)
+}
+
+// Broad oak: a stout trunk under a big lumpy crown, lit from the top left.
 function oak(r, biome) {
-  const g = shadow(new Graphics(), r)
-  g.circle(0, 0, r).fill(pick(biome.trees))
-  for (let k = 0; k < 5; k++) {
-    const a = (k / 5) * Math.PI * 2 + rand(-0.3, 0.3)
-    g.circle(Math.cos(a) * r * 0.55, Math.sin(a) * r * 0.55, r * rand(0.38, 0.5)).fill({ color: pick(biome.trees), alpha: 0.9 })
+  const g = new Graphics()
+  const [dark, mid, light] = [...biome.trees].sort()
+  const stem = r * 0.8
+  const cy = -(stem + r * 0.55) // middle of the crown
+  shadow(g, r * 1.05, r * 0.42)
+  trunk(g, r * 0.16 + 2, stem + r * 0.2)
+  g.circle(0, cy + r * 0.1, r).fill(dark)
+  for (let k = 0; k < 7; k++) {
+    const a = (k / 7) * Math.PI * 2 + rand(-0.25, 0.25)
+    const lit = Math.sin(a) < 0 // upper clumps catch the light
+    g.circle(Math.cos(a) * r * 0.55, cy + Math.sin(a) * r * 0.5, r * rand(0.38, 0.52)).fill(lit ? mid : dark)
   }
-  g.circle(-r * 0.3, -r * 0.3, r * 0.5).fill({ color: biome.leaf, alpha: 0.75 })
-  g.circle(-r * 0.4, -r * 0.42, r * 0.22).fill({ color: biome.leaf, alpha: 0.6 })
-  return g
+  g.circle(-r * 0.25, cy - r * 0.3, r * 0.5).fill({ color: light, alpha: 0.85 })
+  g.circle(-r * 0.4, cy - r * 0.5, r * 0.22).fill({ color: biome.leaf, alpha: 0.8 })
+  // The crown's shadowed underside
+  g.ellipse(0, cy + r * 0.62, r * 0.8, r * 0.25).fill({ color: '#000', alpha: 0.18 })
+  return { g, height: stem + r * 1.55 }
 }
 
-// Small, pale and airy, with a glimpse of white bark.
+// Birch: a slender white trunk with dark marks and a small, airy crown.
 function birch(r, biome) {
-  const g = shadow(new Graphics(), r, 0.15)
-  g.rect(r * 0.5, -2, 4, 7).fill('#e8e0c8').rect(r * 0.5, 1, 4, 1.5).fill('#2b221c')
-  const pale = biome.name === 'The Frostmarch' ? ['#c0c6cc', '#a7aeb6'] : ['#7a8c4c', '#8a9a55', '#9fab66']
-  for (let k = 0; k < 6; k++) {
-    g.circle(rand(-r, r) * 0.45, rand(-r, r) * 0.45, r * rand(0.35, 0.55)).fill({ color: pick(pale), alpha: 0.9 })
+  const g = new Graphics()
+  const stem = r * 1.4
+  shadow(g, r * 0.8, r * 0.3, 0.18)
+  trunk(g, 2.6, stem, '#e8e0c8', '#c9bfa6')
+  for (let k = 0; k < 5; k++) {
+    const y = -stem * rand(0.1, 0.9)
+    g.rect(rand(-2, 0.5), y, rand(1.5, 3), 1.2).fill('#2b221c')
   }
-  return g
+  const pale = biome.name === 'The Frostmarch' ? ['#a7aeb6', '#c0c6cc', '#d9dee2'] : ['#6a7f42', '#7a8c4c', '#8a9a55', '#9fab66']
+  const cy = -stem - r * 0.3
+  for (let k = 0; k < 9; k++) {
+    const x = rand(-r, r) * 0.55
+    const y = cy + rand(-r, r) * 0.6
+    g.circle(x, y, r * rand(0.28, 0.42)).fill(y < cy ? pale[pale.length - 1] : pick(pale))
+  }
+  return { g, height: stem + r * 0.9 }
 }
 
-// Conifer seen from above: stacked star-shaped tiers of needles.
+// Pine: stacked tiers of needles narrowing to a point; snow on the tiers in
+// the Frostmarch.
 function pine(r, biome) {
-  const g = shadow(new Graphics(), r)
+  const g = new Graphics()
   const snowy = biome.name === 'The Frostmarch'
-  const tiers = [
-    [1, pick(biome.trees)],
-    [0.7, pick(biome.trees)],
-    [0.42, snowy ? '#d9dee2' : biome.leaf],
-  ]
-  const spin = rand(0, Math.PI)
-  for (const [scale, colour] of tiers) {
-    const pts = []
-    for (let k = 0; k < 18; k++) {
-      const a = spin + (k / 18) * Math.PI * 2
-      const d = r * scale * (k % 2 ? 0.68 : 1)
-      pts.push(Math.cos(a) * d, Math.sin(a) * d)
-    }
-    g.poly(pts).fill(colour)
+  const [dark, mid] = [...biome.trees].sort()
+  const stem = r * 0.35
+  const tiers = 4
+  const tierH = r * 0.62
+  shadow(g, r * 0.9, r * 0.35)
+  trunk(g, r * 0.1 + 2, stem + 4)
+  for (let k = 0; k < tiers; k++) {
+    const w = r * (1 - k * 0.2)
+    const base = -stem - k * tierH * 0.8
+    const top = base - tierH * 1.25
+    g.poly([-w, base, 0, top, w, base]).fill(k % 2 ? mid : dark)
+    g.poly([0, top, w, base, w * 0.35, base]).fill({ color: '#000', alpha: 0.15 }) // shaded side
+    if (snowy) g.poly([-w * 0.55, base - tierH * 0.55, 0, top, w * 0.25, base - tierH * 0.6]).fill('#eef1f2')
+    else if (k === tiers - 1) g.poly([-w * 0.35, base - tierH * 0.6, 0, top, 0, base - tierH * 0.4]).fill({ color: biome.leaf, alpha: 0.6 })
   }
-  if (snowy) g.circle(-r * 0.2, -r * 0.2, r * 0.18).fill('#eef1f2')
-  return g
+  return { g, height: stem + tierH * (tiers * 0.8 + 0.45) }
 }
 
-// Bare, twisted branches; only the trunk is solid.
+// Dead tree: a bare, twisted trunk with branches clawing upward.
 function deadTree(r) {
   const g = new Graphics()
-  g.circle(3, 4, r * 0.25).fill({ color: '#000', alpha: 0.2 })
+  const stem = r * 0.9
+  shadow(g, r * 0.5, r * 0.2, 0.18)
+  trunk(g, 3, stem, '#5c4a38', '#463828')
   const branch = (x, y, a, len, w) => {
     const ex = x + Math.cos(a) * len
     const ey = y + Math.sin(a) * len
     g.moveTo(x, y).lineTo(ex, ey).stroke({ width: w, color: '#5c4a38', cap: 'round' })
-    if (len > 8) {
-      branch(ex, ey, a + rand(0.3, 0.7), len * 0.6, w * 0.65)
-      branch(ex, ey, a - rand(0.3, 0.7), len * 0.55, w * 0.65)
+    if (len > 7) {
+      branch(ex, ey, a + rand(0.25, 0.6), len * 0.62, w * 0.65)
+      branch(ex, ey, a - rand(0.25, 0.6), len * 0.55, w * 0.65)
     }
   }
-  const limbs = Math.floor(rand(4, 6))
-  for (let k = 0; k < limbs; k++) branch(0, 0, (k / limbs) * Math.PI * 2 + rand(-0.3, 0.3), r * rand(0.45, 0.6), 4)
-  g.circle(0, 0, r * 0.2).fill('#4a3a2b').circle(0, 0, r * 0.1).fill('#3d2f25')
-  return g
+  const limbs = Math.floor(rand(3, 5))
+  for (let k = 0; k < limbs; k++) {
+    const a = -Math.PI / 2 + (k / (limbs - 1) - 0.5) * 2.2 + rand(-0.2, 0.2)
+    branch(0, -stem * rand(0.7, 1), a, r * rand(0.45, 0.6), 3.2)
+  }
+  return { g, height: stem + r * 0.6 }
 }
 
 // --- Rocks and stones -------------------------------------------------------
 
+// A small rock: a low mound, lit on top.
 function rock(r) {
-  const g = shadow(new Graphics(), r)
-  g.ellipse(0, 0, r, r * 0.75).fill('#8d8a80')
-  g.ellipse(-r * 0.25, -r * 0.2, r * 0.45, r * 0.3).fill('#a8a59a')
+  const g = new Graphics()
+  shadow(g, r * 1.1, r * 0.45, 0.25)
+  g.ellipse(0, -r * 0.3, r, r * 0.6).fill('#77736a')
+  g.ellipse(-r * 0.2, -r * 0.45, r * 0.65, r * 0.38).fill('#9a968c')
   return g
 }
 
-// A big faceted boulder, sometimes lichened or snow-capped.
+// A big boulder: lit top, shaded face, a crack; lichen or snow on top.
 function boulder(r, biome) {
   const g = new Graphics()
+  shadow(g, r * 1.2, r * 0.45, 0.28)
   const pts = []
-  const sides = Math.floor(rand(7, 10))
+  const sides = Math.floor(rand(8, 11))
   for (let k = 0; k < sides; k++) {
     const a = (k / sides) * Math.PI * 2
-    const d = r * rand(0.78, 1.05)
-    pts.push(Math.cos(a) * d, Math.sin(a) * d)
+    const d = rand(0.82, 1.05)
+    // Flat underneath, where it sits on the ground
+    pts.push(Math.cos(a) * r * d, Math.min(0, -r * 0.6 + Math.sin(a) * r * 0.75 * d))
   }
-  g.poly(pts.map((v, k) => v + (k % 2 ? r * 0.3 : r * 0.25))).fill({ color: '#000', alpha: 0.25 })
-  g.poly(pts).fill('#6f6b63')
-  g.poly(pts.map((v) => v * 0.7 - r * 0.12)).fill('#8d8a80')
-  g.poly(pts.map((v) => v * 0.35 - r * 0.25)).fill('#a8a59a')
-  g.moveTo(-r * 0.1, -r * 0.5).lineTo(r * 0.15, 0).lineTo(r * 0.05, r * 0.4).stroke({ width: 1.5, color: '#4a463f' })
-  if (biome.name === 'The Frostmarch') g.poly(pts.map((v) => v * 0.45 - r * 0.3)).fill({ color: '#eef1f2', alpha: 0.9 })
-  else if (Math.random() < 0.4) g.circle(r * 0.3, r * 0.2, r * 0.25).fill({ color: '#5d7339', alpha: 0.7 })
+  g.poly(pts).fill('#5f5b54')
+  g.poly(pts.map((v, k) => (k % 2 ? v * 0.75 - r * 0.2 : v * 0.85 - r * 0.08))).fill('#7c786f')
+  g.poly(pts.map((v, k) => (k % 2 ? v * 0.42 - r * 0.42 : v * 0.5 - r * 0.15))).fill('#9a968c')
+  g.moveTo(r * 0.1, -r * 0.9).lineTo(r * 0.25, -r * 0.5).lineTo(r * 0.12, -r * 0.1).stroke({ width: 1.5, color: '#3c3a35' })
+  if (biome.name === 'The Frostmarch') g.ellipse(-r * 0.1, -r * 1.05, r * 0.65, r * 0.25).fill('#eef1f2')
+  else if (Math.random() < 0.4) g.ellipse(r * 0.35, -r * 0.35, r * 0.25, r * 0.18).fill({ color: '#5d7339', alpha: 0.8 })
+  return { g, height: r * 1.4 }
+}
+
+// One standing stone: a weathered upright slab.
+function slab() {
+  const g = new Graphics()
+  const w = rand(5, 7)
+  const h = rand(16, 24)
+  shadow(g, w * 1.6, 4, 0.28)
+  g.roundRect(-w, -h, w * 2, h, 2).fill('#69717c')
+  g.rect(w * 0.2, -h + 2, w * 0.8, h - 2).fill('#575f6b') // shaded side
+  g.roundRect(-w, -h, w * 2, 4, 2).fill('#8f97a1') // weathered top
+  g.moveTo(-w * 0.4, -h * 0.6).lineTo(-w * 0.1, -h * 0.35).stroke({ width: 1, color: '#3c424d' })
   return g
 }
 
-// An ancient ring of standing stones.
+// An ancient ring of standing stones round a flat altar stone.
 function standingStones(r) {
   const g = new Graphics()
-  g.circle(0, 0, r + 10).fill({ color: '#000', alpha: 0.08 })
-  g.roundRect(-9, -6, 18, 12, 2).fill('#7c848f') // the altar
+  g.ellipse(0, 0, r + 10, (r + 10) * 0.9).fill({ color: '#000', alpha: 0.06 })
+  g.roundRect(-10, -5, 20, 10, 2).fill('#7c848f').stroke({ width: 1, color: '#575f6b' })
   const solids = []
+  const uprights = []
   const count = 7
   for (let k = 0; k < count; k++) {
     const a = (k / count) * Math.PI * 2
     const x = Math.cos(a) * r
-    const y = Math.sin(a) * r
-    g.ellipse(x + 3, y + 4, 8, 6).fill({ color: '#000', alpha: 0.25 })
-    g.roundRect(x - 6, y - 8, 12, 15, 3).fill('#69717c').stroke({ width: 1.5, color: '#3c424d' })
-    g.rect(x - 4, y - 6, 4, 9).fill('#8f97a1')
-    solids.push({ x, y, radius: 9 })
+    const y = Math.sin(a) * r * 0.9
+    uprights.push({ g: slab(), x, y })
+    solids.push({ x, y, radius: 8 })
   }
-  return { g, solids }
+  return { g, solids, uprights }
 }
 
 // --- Ground clutter ---------------------------------------------------------
 
+// A tree stump: a short cylinder with rings on its cut top.
 function stump(r) {
-  const g = shadow(new Graphics(), r)
-  g.circle(0, 0, r).fill('#6e553c')
-  g.circle(0, 0, r * 0.75).fill('#b89a70').circle(0, 0, r * 0.45).stroke({ width: 1, color: '#8a6c4b' })
-  g.circle(0, 0, r * 0.15).fill('#8a6c4b')
+  const g = new Graphics()
+  shadow(g, r * 1.2, r * 0.45, 0.25)
+  const h = r * 0.9
+  g.rect(-r, -h, r * 2, h).fill('#5c4632')
+  g.rect(r * 0.2, -h, r * 0.8, h).fill('#46352a')
+  g.ellipse(0, 0, r, r * 0.45).fill('#5c4632')
+  g.ellipse(0, -h, r, r * 0.45).fill('#b89a70')
+  g.ellipse(0, -h, r * 0.55, r * 0.25).stroke({ width: 1, color: '#8a6c4b' })
   return g
 }
 
@@ -145,13 +203,16 @@ function fallenLog(r) {
   return g
 }
 
+// A bush: a rounded mound of leaves, lit on top.
 export function bush(r, biome = BIOMES[0]) {
   const [a, b, c] = biome.bush
-  const g = shadow(new Graphics(), r, 0.15)
-  g.circle(-r * 0.4, 0, r * 0.7).fill(a)
-  g.circle(r * 0.4, -r * 0.1, r * 0.75).fill(b)
-  g.circle(0, r * 0.3, r * 0.6).fill(c)
-  if (Math.random() < 0.4) g.circle(r * 0.2, -r * 0.2, 2.5).fill('#c0392b')
+  const g = new Graphics()
+  shadow(g, r * 1.1, r * 0.4, 0.18)
+  g.circle(-r * 0.45, -r * 0.45, r * 0.6).fill(c)
+  g.circle(r * 0.45, -r * 0.45, r * 0.62).fill(a)
+  g.circle(0, -r * 0.75, r * 0.7).fill(b)
+  g.circle(-r * 0.2, -r * 0.95, r * 0.35).fill({ color: '#ffffff', alpha: 0.12 })
+  if (Math.random() < 0.4) g.circle(r * 0.25, -r * 0.7, 2.5).fill('#c0392b')
   return g
 }
 
@@ -214,70 +275,81 @@ function patch(r, biome) {
 
 // --- Abandoned cottage ----------------------------------------------------------
 
-// Tumbledown stone walls with gaps, fallen roof beams and rubble.
+// Tumbledown stone walls with gaps, a chimney stack still standing, fallen
+// roof beams and rubble. The floor and rubble lie on the ground; each
+// surviving stretch of wall stands up on its own, sorted by its base.
 function ruin() {
   const g = new Graphics()
-  const w = rand(60, 76)
-  const h = rand(46, 58)
+  const w = rand(64, 80)
+  const h = rand(48, 60)
   const solids = []
-  g.rect(-w / 2 + 4, -h / 2 + 5, w, h).fill({ color: '#000', alpha: 0.18 })
+  const uprights = []
+  g.rect(-w / 2 - 2, -h / 2 - 2, w + 4, h + 4).fill({ color: '#000', alpha: 0.12 })
   g.rect(-w / 2, -h / 2, w, h).fill({ color: '#3d2f25', alpha: 0.75 }) // the old floor
+  // Collapsed roof timbers and rubble across the floor
+  for (let k = 0; k < 3; k++) {
+    const y = rand(-h / 3, h / 3)
+    g.moveTo(-w / 2 + rand(4, 15), y).lineTo(w / 2 - rand(4, 15), y + rand(-12, 12)).stroke({ width: 3.5, color: '#2b221c' })
+  }
+  for (let k = 0; k < 14; k++) g.ellipse(rand(-w / 2 - 10, w / 2 + 10), rand(-h / 2 - 8, h / 2 + 10), rand(2, 4), rand(1.5, 3))
+  g.fill('#7c766c')
+  if (Math.random() < 0.6) g.circle(rand(-w / 4, w / 4), rand(-h / 4, h / 4), 9).fill({ color: '#4f6634', alpha: 0.8 })
+
   const corners = [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]]
   for (let side = 0; side < 4; side++) {
     const [x1, y1] = corners[side]
     const [x2, y2] = corners[(side + 1) % 4]
-    // Each wall survives in a few stretches
-    const steps = 6
+    const angle = Math.atan2(y2 - y1, x2 - x1)
+    const len = Math.hypot(x2 - x1, y2 - y1)
+    // Each wall survives in a few stretches, highest towards the corners
+    const steps = 5
     for (let k = 0; k < steps; k++) {
       if (Math.random() < 0.35) continue
-      const t1 = k / steps
-      const t2 = (k + 1) / steps
-      const ax = x1 + (x2 - x1) * t1
-      const ay = y1 + (y2 - y1) * t1
-      const bx = x1 + (x2 - x1) * t2
-      const by = y1 + (y2 - y1) * t2
-      g.moveTo(ax, ay).lineTo(bx, by).stroke({ width: 9, color: '#4a463f', cap: 'square' })
-      g.moveTo(ax, ay).lineTo(bx, by).stroke({ width: 6, color: '#8a857a', cap: 'square' })
-      solids.push({ x: (ax + bx) / 2, y: (ay + by) / 2, radius: 7 })
+      const t = (k + 0.5) / steps
+      const edge = 1 - Math.abs(t - 0.5) * 2 // 0 at the corners
+      const high = rand(6, 14) + (1 - edge) * rand(6, 16)
+      const x = x1 + (x2 - x1) * t
+      const y = y1 + (y2 - y1) * t
+      const wall = new Graphics()
+      drawSolid(wall, box(len / steps + 0.5, 7, high, angle, pick(['#8a857a', '#827d72', '#918c80']), { top: '#a39e92' }), { outline: '#4a463f' })
+      // A stone or two left balanced on top
+      if (Math.random() < 0.5) wall.rect(rand(-5, 2), -high - 3, rand(4, 7), 3).fill('#7c776d')
+      uprights.push({ g: wall, x, y })
+      solids.push({ x, y, radius: 7 })
     }
-  }
-  // Collapsed roof timbers
-  for (let k = 0; k < 3; k++) {
-    const y = rand(-h / 3, h / 3)
-    g.moveTo(-w / 2 + rand(0, 15), y).lineTo(w / 2 - rand(0, 15), y + rand(-12, 12)).stroke({ width: 3, color: '#2b221c' })
   }
   // Chimney stack still standing in one corner
   const [cx, cy] = pick(corners)
-  g.rect(cx - 7, cy - 7, 14, 14).fill('#69717c').stroke({ width: 2, color: '#3c424d' })
+  const chimney = new Graphics()
+  drawSolid(chimney, box(14, 14, rand(38, 52), 0, '#69717c', { top: '#3c424d' }), { outline: '#3c424d' })
+  uprights.push({ g: chimney, x: cx, y: cy })
   solids.push({ x: cx, y: cy, radius: 9 })
-  // Rubble
-  for (let k = 0; k < 10; k++) g.circle(rand(-w / 2 - 8, w / 2 + 8), rand(-h / 2 - 8, h / 2 + 8), rand(1.5, 3.5))
-  g.fill('#7c766c')
-  if (Math.random() < 0.6) g.circle(rand(-w / 4, w / 4), rand(-h / 4, h / 4), 8).fill('#4f6634')
-  return { g, solids }
+  return { g, solids, uprights }
 }
 
 // --- What grows where ------------------------------------------------------------
 
 // Relative chances of each feature in each region. `size` is a radius
-// range, `top` puts it above the travellers (tree canopies), `solid` is the
-// fraction of its radius you can't pass through.
+// range; `upright` things stand up and are depth-sorted with the people (a
+// trunk or boulder hides whoever is behind it); `solid` is how much of the
+// base you can't pass through (for trees, just the trunk); `spin` things
+// lie flat on the ground and can be turned any way.
 const FEATURES = {
-  oak: { draw: oak, size: [26, 44], top: true, solid: 0.6, grove: 0.35 },
-  birch: { draw: birch, size: [16, 24], top: true, solid: 0.45, grove: 0.5 },
-  pine: { draw: pine, size: [20, 36], top: true, solid: 0.45, grove: 0.6 },
-  deadTree: { draw: deadTree, size: [22, 34], top: true, solid: 0.22 },
+  oak: { draw: oak, size: [26, 44], upright: true, solid: (r) => r * 0.16 + 4, grove: 0.35, tree: true },
+  birch: { draw: birch, size: [16, 24], upright: true, solid: () => 4, grove: 0.5, tree: true },
+  pine: { draw: pine, size: [20, 36], upright: true, solid: (r) => r * 0.1 + 4, grove: 0.6, tree: true },
+  deadTree: { draw: deadTree, size: [22, 34], upright: true, solid: () => 5, tree: true },
   // `stones` is how many stones can be gathered from it
-  boulder: { draw: boulder, size: [16, 32], solid: 0.85, stones: [10, 16] },
+  boulder: { draw: boulder, size: [16, 32], upright: true, solid: (r) => r * 0.85, stones: [10, 16] },
   rock: { draw: rock, size: [5, 12], stones: [3, 6] },
   stump: { draw: stump, size: [6, 10] },
-  log: { draw: fallenLog, size: [16, 26] },
+  log: { draw: fallenLog, size: [16, 26], spin: true },
   bush: { draw: bush, size: [10, 17] },
   tufts: { draw: tufts, size: [10, 10] },
-  flowers: { draw: flowers, size: [10, 16] },
+  flowers: { draw: flowers, size: [10, 16], spin: true },
   mushrooms: { draw: mushrooms, size: [8, 12] },
-  bones: { draw: bones, size: [8, 12] },
-  patch: { draw: patch, size: [70, 140], flat: true },
+  bones: { draw: bones, size: [8, 12], spin: true },
+  patch: { draw: patch, size: [70, 140], flat: true, spin: true },
   ruin: { draw: ruin, size: [48, 48], parts: true },
   stones: { draw: standingStones, size: [40, 46], parts: true },
 }
@@ -298,11 +370,12 @@ function choose(mix) {
 // Dresses the land on both sides of the road, out past the edge of the
 // screen, and keeps it clear of the road, side roads and encounters.
 export class Scenery {
-  constructor(groundLayer, canopyLayer, road, getZones = () => []) {
+  // `uprightLayer` is the depth-sorted layer shared with the people.
+  constructor(groundLayer, uprightLayer, road, getZones = () => []) {
     this.patches = new Container() // ground colour patches lie under everything
     groundLayer.addChild(this.patches)
     this.ground = groundLayer
-    this.canopy = canopyLayer
+    this.upright = uprightLayer
     this.road = road
     this.getZones = getZones // areas (camps, roadblocks) to keep clear
     this.items = []
@@ -318,7 +391,7 @@ export class Scenery {
   clear(zones) {
     this.items = this.items.filter((item) => {
       if (!zones.some((z) => Math.hypot(z.x - item.x, z.y - item.y) < z.radius + item.r * 0.5)) return true
-      item.obj.destroy()
+      this.remove(item)
       return false
     })
   }
@@ -332,9 +405,24 @@ export class Scenery {
     }
     this.items = this.items.filter((item) => {
       if (item.index >= index - 80) return true
-      item.obj.destroy()
+      this.remove(item)
       return false
     })
+  }
+
+  remove(item) {
+    item.obj.destroy()
+    item.extras?.forEach((o) => o.destroy())
+  }
+
+  // Trees you're standing behind fade, so you never lose sight of yourself.
+  fadeAround(x, y) {
+    for (const item of this.items) {
+      if (!item.height) continue
+      const hidden = y < item.y && y > item.y - item.height && Math.abs(x - item.x) < item.r + 6
+      const target = hidden ? 0.4 : 1
+      item.obj.alpha += (target - item.obj.alpha) * 0.2
+    }
   }
 
   placeAround(i) {
@@ -368,23 +456,33 @@ export class Scenery {
     if (!this.isClear(x, y, i, f.flat ? 0 : r + 12, big ? r : 0)) return false
 
     const drawn = f.draw(r, biome)
-    const obj = f.parts ? drawn.g : drawn
+    const obj = drawn.g ?? drawn
     obj.position.set(x, y)
-    if (!f.parts) obj.rotation = rand(0, Math.PI * 2)
-    else obj.rotation = rand(-0.4, 0.4)
-    ;(f.flat ? this.patches : f.top ? this.canopy : this.ground).addChild(obj)
+    if (f.spin) obj.rotation = rand(0, Math.PI * 2)
+    if (f.upright) {
+      obj.zIndex = y // depth-sorted by where it meets the ground
+      this.upright.addChild(obj)
+    } else {
+      ;(f.flat ? this.patches : this.ground).addChild(obj)
+    }
 
     let solids = []
+    const extras = []
     if (f.parts) {
-      // Solid parts were laid out unrotated around the origin
-      const c = Math.cos(obj.rotation)
-      const s = Math.sin(obj.rotation)
-      solids = drawn.solids.map((q) => ({ x: x + q.x * c - q.y * s, y: y + q.x * s + q.y * c, radius: q.radius }))
+      solids = drawn.solids.map((q) => ({ x: x + q.x, y: y + q.y, radius: q.radius }))
+      // Separate standing pieces (stones in a ring), each sorted by its own base
+      for (const u of drawn.uprights ?? []) {
+        u.g.position.set(x + u.x, y + u.y)
+        u.g.zIndex = y + u.y
+        this.upright.addChild(u.g)
+        extras.push(u.g)
+      }
     } else if (f.solid) {
-      solids = [{ x, y, radius: r * f.solid }]
+      solids = [{ x, y, radius: f.solid(r) }]
     }
     const gather = f.stones ? Math.floor(rand(f.stones[0], f.stones[1] + 1)) : 0
-    this.items.push({ obj, index: i, x, y, r, big: !!big, solids, gather, kind: name })
+    const height = f.tree ? drawn.height : 0 // only trees fade (see fadeAround)
+    this.items.push({ obj, extras, index: i, x, y, r, big: !!big, solids, gather, kind: name, height })
     return true
   }
 
@@ -409,11 +507,11 @@ export class Scenery {
     item.gather = Math.max(0, item.gather - taken)
     if (item.gather) return
     if (item.kind === 'rock') {
-      item.obj.destroy()
+      this.remove(item)
       this.items.splice(this.items.indexOf(item), 1)
     } else {
       item.obj.tint = 0xc8c2b8
-      for (let k = 0; k < 6; k++) item.obj.circle(rand(-item.r, item.r) * 0.8, rand(-item.r, item.r) * 0.8, rand(1, 2.5))
+      for (let k = 0; k < 6; k++) item.obj.circle(rand(-item.r, item.r) * 0.8, -item.r * rand(0.1, 1.1), rand(1, 2.5))
       item.obj.fill('#a8a59a')
     }
   }

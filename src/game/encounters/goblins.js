@@ -1,27 +1,8 @@
 import { Container, Graphics } from 'pixi.js'
 import { ROAD_WIDTH } from '../road.js'
 import { addProp, maybeAddChest } from '../loot.js'
-import { rand, randInt, roadFrame, sideThatFits, drawClearing, campfire } from './helpers.js'
-
-export function drawHideTent(g, x, y, facing) {
-  const c = Math.cos(facing)
-  const s = Math.sin(facing)
-  const pt = (fx, fy) => [x + fx * c - fy * s, y + fx * s + fy * c]
-  g.ellipse(x + 6, y + 6, 28, 24).fill({ color: '#000', alpha: 0.2 })
-  g.poly([...pt(26, 0), ...pt(0, -22), ...pt(-24, 0), ...pt(0, 22)]).fill('#8b7355')
-  g.poly([...pt(26, 0), ...pt(0, -22), ...pt(0, 22)]).fill('#9c8462')
-  g.moveTo(...pt(-24, 0)).lineTo(...pt(26, 0)).stroke({ width: 2, color: '#5e4a33' })
-  g.poly([...pt(26, 0), ...pt(14, -7), ...pt(14, 7)]).fill('#2a1f14')
-  for (const [fx, fy] of [[-18, -10], [8, -16], [-6, 14]]) g.circle(...pt(fx, fy), 3).fill('#6e5a40')
-}
-
-export function drawSkullTotem(g, x, y) {
-  g.circle(x + 3, y + 3, 7).fill({ color: '#000', alpha: 0.2 })
-  g.circle(x, y, 3).fill('#5a3a1a')
-  g.circle(x, y - 2, 6).fill('#e8e0c8')
-  g.circle(x - 2, y - 3, 1.6).fill('#1a1008')
-  g.circle(x + 2, y - 3, 1.6).fill('#1a1008')
-}
+import { rand, randInt, roadFrame, setBack, footpath, drawClearing, campfire, DEEP_CHEST_CHANCE } from './helpers.js'
+import { hideTent, skullTotem, overturnedWagon } from '../structures.js'
 
 export function scatterBones(g, x, y, spreadX, spreadY, count) {
   for (let k = 0; k < count; k++) {
@@ -33,19 +14,24 @@ export function scatterBones(g, x, y, spreadX, spreadY, count) {
   g.stroke({ width: 2, color: '#e8e0c8', cap: 'round' })
 }
 
-// Goblin camp: hide tents round a campfire in a clearing just off the road.
-// The goblins mill about until the cart comes into view, then swarm it.
-export function goblinCamp({ layer, road, i, difficulty, extra, enemies }) {
-  const offset = ROAD_WIDTH / 2 + 125
-  const side = sideThatFits(road, i, offset)
-  if (!side) return null
+// Goblin camp: hide tents round a campfire in a clearing, either just off
+// the road or out in the wilds down a trodden path (a skull on a pole
+// marks where it leaves the road). The goblins mill about until you come
+// into view, then swarm.
+export function goblinCamp(ctx) {
+  const { layer, stand, road, i, difficulty, extra, enemies } = ctx
+  const spot = setBack(ctx, ROAD_WIDTH / 2 + 125, 190)
+  if (!spot) return null
+  const { side } = spot
   const { at } = roadFrame(road, i)
-  const [cx, cy] = at(0, side * offset)
+  const [cx, cy] = [spot.x, spot.y]
+  const edge = at(0, side * (ROAD_WIDTH / 2))
 
   const view = new Container()
   const g = new Graphics()
   view.addChild(g)
-  drawClearing(g, cx, cy, ...at(0, side * (ROAD_WIDTH / 2)))
+  drawClearing(g, cx, cy, ...(spot.deep ? [] : edge))
+  const path = spot.deep ? footpath(g, edge, [cx, cy], '#8f8a52') : []
 
   const solids = [{ x: cx, y: cy, radius: 16 }]
   const tents = randInt(2, 3)
@@ -54,19 +40,19 @@ export function goblinCamp({ layer, road, i, difficulty, extra, enemies }) {
     const a = start + (k / tents) * Math.PI * 2 + rand(-0.3, 0.3)
     const tx = cx + Math.cos(a) * 92
     const ty = cy + Math.sin(a) * 80
-    drawHideTent(g, tx, ty, a + Math.PI)
+    stand(hideTent(a + Math.PI), tx, ty, { fade: { r: 24, height: 48 } })
     solids.push({ x: tx, y: ty, radius: 22 })
   }
   scatterBones(g, cx, cy, 70, 60, 5)
-  drawSkullTotem(g, ...at(-20, side * (ROAD_WIDTH / 2 + 22)))
-  const flicker = campfire(g, view, cx, cy)
+  stand(skullTotem(), ...at(-20, side * (ROAD_WIDTH / 2 + 22)))
+  const flicker = campfire(g, view, stand, cx, cy)
   // Stolen goods stacked beside a tent
   const loot = []
   const la = start + Math.PI / tents
   const [lx, ly] = [cx + Math.cos(la) * 100, cy + Math.sin(la) * 86]
-  addProp(view, 'crate', lx, ly, 16)
-  maybeAddChest(loot, view, lx - 6, ly + 22)
-  if (Math.random() < 0.6) addProp(view, 'barrel', lx + 20, ly + 8, 8)
+  addProp(stand, 'crate', lx, ly, 16)
+  maybeAddChest(loot, stand, lx - 6, ly + 22, spot.deep ? DEEP_CHEST_CHANCE : undefined)
+  if (Math.random() < 0.6) addProp(stand, 'barrel', lx + 20, ly + 8, 8)
   solids.push({ x: lx, y: ly, radius: 10 })
   layer.addChild(view)
 
@@ -84,14 +70,15 @@ export function goblinCamp({ layer, road, i, difficulty, extra, enemies }) {
     solids,
     loot,
     zone: { x: cx, y: cy, radius: 190 },
-    trigger: { x: cx, y: cy, radius: 430 },
+    zones: [{ x: cx, y: cy, radius: 190 }, ...path],
+    trigger: { x: cx, y: cy, radius: spot.deep ? 330 : 430 },
     animate: flicker,
   }
 }
 
 // Goblin burrows: dirt mounds right beside the road. Goblins pop out of the
 // holes one after another as the cart rolls past.
-export function goblinBurrows({ layer, road, i, difficulty, extra, enemies }) {
+export function goblinBurrows({ layer, stand, road, i, difficulty, extra, enemies }) {
   const { at, n } = roadFrame(road, i)
   const view = new Container()
   const g = new Graphics()
@@ -117,7 +104,7 @@ export function goblinBurrows({ layer, road, i, difficulty, extra, enemies }) {
   }
   scatterBones(g, ...at(70, 0), 40, ROAD_WIDTH / 2 + 60, 3)
   const loot = []
-  maybeAddChest(loot, view, ...at(70, sides[0] * (ROAD_WIDTH / 2 + 105))) // their hoard
+  maybeAddChest(loot, stand, ...at(70, sides[0] * (ROAD_WIDTH / 2 + 105))) // their hoard
   layer.addChild(view)
 
   const [mx, my] = at(70, 0)
@@ -145,7 +132,7 @@ export function goblinBurrows({ layer, road, i, difficulty, extra, enemies }) {
 
 // Goblin looters: a merchant's wagon overturned at the roadside, goods strewn
 // everywhere. The goblins are busy picking it over and slow to notice you.
-export function goblinLooters({ layer, road, i, difficulty, extra, enemies }) {
+export function goblinLooters({ layer, stand, road, i, difficulty, extra, enemies }) {
   const { at, d } = roadFrame(road, i)
   const side = Math.random() < 0.5 ? -1 : 1
   const lateral = side * (ROAD_WIDTH / 2 - 4)
@@ -159,12 +146,7 @@ export function goblinLooters({ layer, road, i, difficulty, extra, enemies }) {
   const g = new Graphics()
   view.addChild(g)
   // Upturned wagon: we see its dark underside, axles and one wheel left on.
-  g.poly([...pt(-32, -20), ...pt(32, -20), ...pt(32, 20), ...pt(-32, 20)]).fill('#3a2a1a')
-  g.poly([...pt(-30, -18), ...pt(30, -18), ...pt(30, 18), ...pt(-30, 18)]).fill('#5e3f22')
-  for (const fx of [-18, 18]) g.moveTo(...pt(fx, -20)).lineTo(...pt(fx, 20))
-  g.stroke({ width: 4, color: '#2a1f14' })
-  g.moveTo(...pt(-30, 0)).lineTo(...pt(30, 0)).stroke({ width: 2, color: '#4a3220' })
-  g.poly([...pt(-24, -26), ...pt(-12, -26), ...pt(-12, -21), ...pt(-24, -21)]).fill('#2a1f14')
+  stand(overturnedWagon(angle), wx, wy, { fade: { r: 34, height: 26 } })
   // A loose wheel, the broken shaft and the spilled load
   const [lx, ly] = at(-50, lateral + side * 40)
   g.circle(lx, ly, 13).stroke({ width: 3, color: '#3a2a1a' })
@@ -179,10 +161,10 @@ export function goblinLooters({ layer, road, i, difficulty, extra, enemies }) {
   for (let k = 0; k < 6; k++) g.ellipse(...at(rand(-50, 50), lateral + rand(-40, 30) * side), 5, 4)
   g.fill('#c9b28a')
   const loot = []
-  addProp(view, 'crate', ...at(28, lateral + side * 30), 16)
-  addProp(view, 'crate', ...at(-36, lateral - side * 14), 14)
-  addProp(view, 'barrel', ...at(40, lateral - side * 6), 8)
-  maybeAddChest(loot, view, ...at(-10, lateral - side * 40)) // the merchant's strongbox
+  addProp(stand, 'crate', ...at(28, lateral + side * 30), 16)
+  addProp(stand, 'crate', ...at(-36, lateral - side * 14), 14)
+  addProp(stand, 'barrel', ...at(40, lateral - side * 6), 8)
+  maybeAddChest(loot, stand, ...at(-10, lateral - side * 40)) // the merchant's strongbox
   layer.addChild(view)
 
   const solids = [-22, 0, 22].map((fx) => {

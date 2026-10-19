@@ -201,6 +201,12 @@ class Enemy {
     }
 
     this.rig.aiming = this.alive && this.state === 'chase' && this.archery?.mode === 'aim'
+    if (this.archery) {
+      // Drawing the bow slowly through the aim: the shot comes at full draw
+      const a = this.archery
+      this.rig.pull = a.mode === 'aim' ? Math.min(1, Math.max(0, 1 - a.timer / this.shoots.aim)) : 0
+      this.rig.loaded = a.mode === 'aim'
+    }
     this.rig.update(dt, this.facing, Math.hypot(this.vx, this.vy))
     this.view.position.set(this.x, this.y)
     // Nearer the bottom of the screen draws in front; the dead lie under all

@@ -3,42 +3,31 @@ import { ROAD_WIDTH } from '../road.js'
 import { bush } from '../scenery.js'
 import { stageAt } from '../threat.js'
 import { addProp, maybeAddChest } from '../loot.js'
-import { rand, randInt, roadFrame, sideThatFits, drawClearing, campfire, drawLog } from './helpers.js'
-
-export function drawLeanTo(g, x, y, facing) {
-  const c = Math.cos(facing)
-  const s = Math.sin(facing)
-  const pt = (fx, fy) => [x + fx * c - fy * s, y + fx * s + fy * c]
-  g.poly([...pt(-14, -24), ...pt(18, -24), ...pt(18, 24), ...pt(-14, 24)].map((v) => v + 5)).fill({ color: '#000', alpha: 0.2 })
-  g.poly([...pt(-14, -24), ...pt(18, -24), ...pt(18, 24), ...pt(-14, 24)]).fill('#c8b994')
-  g.poly([...pt(-14, -24), ...pt(2, -24), ...pt(2, 24), ...pt(-14, 24)]).fill('#b3a37c')
-  g.moveTo(...pt(-14, -24)).lineTo(...pt(-14, 24)).stroke({ width: 3, color: '#5e3f22' })
-  g.moveTo(...pt(2, -24)).lineTo(...pt(2, 24)).stroke({ width: 1.5, color: '#8f8160' })
-  g.circle(...pt(-6, 8), 5).fill('#7d4a3a')
-}
-
-export function drawWatchtower(g, x, y) {
-  g.rect(x - 13, y - 9, 34, 34).fill({ color: '#000', alpha: 0.25 })
-  g.rect(x - 17, y - 17, 34, 34).fill('#6e4a28')
-  for (let k = -12; k <= 12; k += 8) g.moveTo(x - 17, y + k).lineTo(x + 17, y + k)
-  g.stroke({ width: 1, color: '#4a3220' })
-  g.rect(x - 17, y - 17, 34, 34).stroke({ width: 3, color: '#4a3220' })
-  for (const [px, py] of [[-17, -17], [17, -17], [-17, 17], [17, 17]]) g.circle(x + px, y + py, 3.5).fill('#3a2a1a')
-}
+import { rand, randInt, roadFrame, setBack, footpath, drawClearing, campfire, DEEP_CHEST_CHANCE } from './helpers.js'
+import { leanTo, watchtower, log } from '../structures.js'
+import { project, turn } from '../iso.js'
 
 // Bandit camp: canvas lean-tos round a fire, stolen loot piled up, and a
 // watchtower by the road whose lookout raises the alarm from far off.
-export function banditCamp({ layer, road, i, difficulty, extra, enemies }) {
+// Out in the wilds, the camp is found by its smoke or the path to it, and
+// the lookout watches the path instead of the road.
+export function banditCamp(ctx) {
+  const { layer, stand, road, i, difficulty, extra, enemies } = ctx
   const offset = ROAD_WIDTH / 2 + 150
-  const side = sideThatFits(road, i, offset)
-  if (!side) return null
-  const { at } = roadFrame(road, i)
-  const [cx, cy] = at(0, side * offset)
+  const spot = setBack(ctx, offset, 200)
+  if (!spot) return null
+  const { side } = spot
+  const { at, d, n } = roadFrame(road, i)
+  const [cx, cy] = [spot.x, spot.y]
+  // Positions around the camp: `along` the road's direction, `out` away from it
+  const atCamp = (along, out) => [cx + d.x * along + n.x * side * out, cy + d.y * along + n.y * side * out]
+  const edge = at(0, side * (ROAD_WIDTH / 2))
 
   const view = new Container()
   const g = new Graphics()
   view.addChild(g)
-  drawClearing(g, cx, cy, ...at(0, side * (ROAD_WIDTH / 2)), '#8a7f55')
+  drawClearing(g, cx, cy, ...(spot.deep ? [] : edge), '#8a7f55')
+  const path = spot.deep ? footpath(g, edge, [cx, cy]) : []
 
   const solids = [{ x: cx, y: cy, radius: 16 }]
   const start = rand(0, Math.PI * 2)
@@ -47,7 +36,7 @@ export function banditCamp({ layer, road, i, difficulty, extra, enemies }) {
     const a = start + (k / tents) * Math.PI * 2
     const tx = cx + Math.cos(a) * 95
     const ty = cy + Math.sin(a) * 82
-    drawLeanTo(g, tx, ty, a)
+    stand(leanTo(a + Math.PI), tx, ty, { fade: { r: 28, height: 36 } })
     solids.push({ x: tx, y: ty, radius: 22 })
   }
   // Log benches round the fire
@@ -56,23 +45,26 @@ export function banditCamp({ layer, road, i, difficulty, extra, enemies }) {
     const bx = cx + Math.cos(a) * 42
     const by = cy + Math.sin(a) * 42
     const t = a + Math.PI / 2
-    drawLog(g, bx - Math.cos(t) * 14, by - Math.sin(t) * 14, bx + Math.cos(t) * 14, by + Math.sin(t) * 14, 9)
+    stand(log(28, 4.5, t), bx, by)
   }
   // Stolen goods
-  const [chx, chy] = at(rand(-60, -30), side * (offset + 60))
+  const [chx, chy] = atCamp(rand(-60, -30), 60)
   const loot = []
-  maybeAddChest(loot, view, chx, chy)
-  addProp(view, 'crate', chx + 22, chy + 6, 15)
-  addProp(view, 'barrel', chx - 20, chy + 10, 8)
+  maybeAddChest(loot, stand, chx, chy, spot.deep ? DEEP_CHEST_CHANCE : undefined)
+  addProp(stand, 'crate', chx + 22, chy + 6, 15)
+  addProp(stand, 'barrel', chx - 20, chy + 10, 8)
   solids.push({ x: chx, y: chy, radius: 12 })
-  const flicker = campfire(g, view, cx, cy)
+  const flicker = campfire(g, view, stand, cx, cy)
 
-  const [twx, twy] = at(40, side * (ROAD_WIDTH / 2 + 55))
-  drawWatchtower(g, twx, twy)
+  const [twx, twy] = atCamp(40, spot.deep ? -125 : -(offset - ROAD_WIDTH / 2 - 55))
+  const toCamp = Math.atan2(cy - twy, cx - twx)
+  stand(watchtower(toCamp).g, twx, twy, { fade: { r: 20, height: 56 } })
   solids.push({ x: twx, y: twy, radius: 20 })
   layer.addChild(view)
 
-  const members = [enemies.add('archer', twx, twy, { x: twx, y: twy, facing: Math.atan2(cy - twy, cx - twx) + Math.PI })]
+  // The lookout keeps watch at the foot of the ladder
+  const [ax, ay] = [twx + Math.cos(toCamp) * 26, twy + Math.sin(toCamp) * 26]
+  const members = [enemies.add('archer', ax, ay, { x: ax, y: ay, facing: toCamp + Math.PI })]
   const sitting = Math.min(5 + extra, 2 + Math.floor(difficulty))
   for (let k = 0; k < sitting; k++) {
     const a = rand(0, Math.PI * 2)
@@ -81,7 +73,7 @@ export function banditCamp({ layer, road, i, difficulty, extra, enemies }) {
     members.push(enemies.add('bandit', x, y, { x, y, facing: a + Math.PI }))
   }
   if (difficulty >= 1 || Math.random() < 0.35) {
-    const [x, y] = at(-20, side * (offset + 20))
+    const [x, y] = atCamp(-20, 20)
     members.push(enemies.add('captain', x, y, { x, y, facing: Math.atan2(cy - y, cx - x) }))
   }
 
@@ -91,37 +83,42 @@ export function banditCamp({ layer, road, i, difficulty, extra, enemies }) {
     solids,
     loot,
     zone: { x: cx, y: cy, radius: 200 },
-    trigger: { x: twx, y: twy, radius: 470 },
+    zones: [{ x: cx, y: cy, radius: 200 }, ...path],
+    trigger: { x: twx, y: twy, radius: spot.deep ? 360 : 470 },
     animate: flicker,
   }
 }
 
 // Bandit roadblock: a spiked log barricade right across the road. Getting
 // round it means leaving the road for the mud while the bandits pile in.
-export function banditRoadblock({ layer, road, i, difficulty, extra, enemies }) {
-  const { at, d } = roadFrame(road, i)
+export function banditRoadblock({ layer, stand, road, i, difficulty, extra, enemies }) {
+  const { at, d, n } = roadFrame(road, i)
   const half = ROAD_WIDTH / 2 + 36
 
   const view = new Container()
   const g = new Graphics()
   view.addChild(g)
   g.moveTo(...at(4, -half)).lineTo(...at(4, half)).stroke({ width: 22, color: '#000', alpha: 0.2, cap: 'round' })
-  // Sharpened stakes pointing at oncoming traffic
+  // Two logs across the road, overlapping in the middle
+  const across = Math.atan2(n.y, n.x)
+  stand(log(half + 14, 8, across), ...at(0, (-half + 14) / 2))
+  stand(log(half + 14, 8, across), ...at(-3, (half - 14) / 2))
+  // Sharpened stakes jutting out at oncoming traffic, each stood at its foot
+  const T = turn(Math.atan2(d.y, d.x))
   for (let l = -half + 6; l <= half - 6; l += 13) {
-    g.moveTo(...at(-2, l)).lineTo(...at(-22, l + rand(-3, 3)))
+    const stake = new Graphics()
+    const [tx, ty] = project([...T([-20, rand(-3, 3), 0]).slice(0, 2), 13])
+    stake.moveTo(0, -3).lineTo(tx, ty).stroke({ width: 3.5, color: '#7a5a34', cap: 'round' })
+    stake.circle(tx, ty, 1.6).fill('#c9b28a')
+    stand(stake, ...at(-6, l))
   }
-  g.stroke({ width: 4, color: '#7a5a34', cap: 'round' })
-  for (let l = -half + 6; l <= half - 6; l += 13) g.circle(...at(-22, l), 1.6)
-  g.fill('#c9b28a')
-  drawLog(g, ...at(0, -half), ...at(0, 14))
-  drawLog(g, ...at(0, -14), ...at(0, half))
   const side = Math.random() < 0.5 ? -1 : 1
   const [bx, by] = at(36, side * (half + 10))
   const [rx, ry] = at(58, side * (half + 18))
   const loot = []
-  addProp(view, 'crate', bx, by)
-  addProp(view, 'barrel', rx, ry)
-  maybeAddChest(loot, view, ...at(46, side * (half + 30))) // the tolls they've taken
+  addProp(stand, 'crate', bx, by)
+  addProp(stand, 'barrel', rx, ry)
+  maybeAddChest(loot, stand, ...at(46, side * (half + 30))) // the tolls they've taken
   layer.addChild(view)
 
   const solids = []
@@ -163,7 +160,7 @@ export function banditRoadblock({ layer, road, i, difficulty, extra, enemies }) 
 // Bandit ambush: bandits crouched in thick roadside bushes. Watch for the
 // tells: hoods peeking out, a glint of steel, trampled grass and rustling.
 // A stone into a bush will flush them out early.
-export function banditAmbush({ layer, road, i, difficulty, extra, enemies }) {
+export function banditAmbush({ layer, stand, road, i, difficulty, extra, enemies }) {
   const { at, n } = roadFrame(road, i)
   const view = new Container()
   const ground = new Graphics()
@@ -185,19 +182,19 @@ export function banditAmbush({ layer, road, i, difficulty, extra, enemies }) {
     }
 
     const b = bush(r, stageAt(road.points[i].along / 20).biome) // blends in with the local scrub
-    b.position.set(x, y)
-    b.rotation = b.baseRotation = rand(0, Math.PI * 2)
-    // A hood poking out on the road side, and a blade that catches the light
+    stand(b, x, y)
+    b.baseRotation = 0
+    // A hood peeking over the top on the road side, and a blade that
+    // catches the light
     const toRoad = { x: -n.x * side, y: -n.y * side }
-    const peek = new Graphics().circle(0, 0, 6.5).fill('#2d2a26').circle(2, 0, 2.5).fill('#8c2f22')
-    peek.position.set(x + toRoad.x * (r - 6), y + toRoad.y * (r - 6))
+    const peek = new Graphics().circle(0, 0, 6.5).fill('#2d2a26').circle(toRoad.x * 2.5, 1, 2.5).fill('#8c2f22')
+    stand(peek, x + toRoad.x * r * 0.45, y - r * 1.1, { depth: y + 0.4 })
     const glint = new Graphics()
       .moveTo(-5, 0).lineTo(5, 0).moveTo(0, -5).lineTo(0, 5)
       .stroke({ width: 2, color: '#ffffff', cap: 'round' })
       .circle(0, 0, 2).fill('#ffffff')
-    glint.position.set(peek.x + toRoad.y * 10, peek.y - toRoad.x * 10)
+    stand(glint, x + toRoad.x * r * 0.9, y - r * 0.6, { depth: y + 0.5 })
     glint.alpha = 0
-    view.addChild(b, peek, glint)
     spots.push({ bush: b, peek, glint, nextGlint: rand(0.5, 2.5) })
 
     const facing = Math.atan2(toRoad.y, toRoad.x)
@@ -205,7 +202,7 @@ export function banditAmbush({ layer, road, i, difficulty, extra, enemies }) {
   }
   // Their stash, stowed further back from the road
   const loot = []
-  maybeAddChest(loot, view, ...at(55, sides[0] * (ROAD_WIDTH / 2 + 95)))
+  maybeAddChest(loot, stand, ...at(55, sides[0] * (ROAD_WIDTH / 2 + 95)))
   layer.addChild(view)
 
   const [mx, my] = at(55, 0)

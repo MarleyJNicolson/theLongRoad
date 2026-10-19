@@ -3,7 +3,7 @@ import { Input } from './input.js'
 import { Road, ROAD_WIDTH } from './road.js'
 import { Scenery } from './scenery.js'
 import { HorseCart } from './cart.js'
-import { Peasant, PEASANT_RADIUS } from './peasant.js'
+import { Peasant, PEASANT_RADIUS, DASH_TIME } from './peasant.js'
 import { Enemies } from './enemies.js'
 import { Stones } from './stones.js'
 import { EnemyArrows } from './enemyArrows.js'
@@ -29,6 +29,13 @@ const CAMERA_MARGIN = 90 // closest the player gets to the screen edge
 const LOOT_REACH = 34 // how close to stand to search a container
 const MOUNT_REACH = 48 // how close to the cart to climb back on
 const TOAST_TIME = 1.8
+// The peasant's own stamina (the horse has its own): sprinting drains it,
+// a dash takes a chunk at once, and it comes back after a short rest.
+const SPRINT_DRAIN = 1 / 4.5 // a full bar lasts 4.5 s of sprinting
+const DASH_COST = 0.3
+const DASH_COOLDOWN = 0.45
+const BREATH_REGEN = 1 / 3
+const BREATH_REGEN_DELAY = 0.6
 const TRADE_REACH = 46 // how close to stand to a trader
 const STORAGE_REACH = 90 // how close to stand to the cart to use its storage
 
@@ -84,15 +91,16 @@ export class Game {
     const actors = new Container()
     const canopy = new Container()
     const air = new Container()
-    this.world.addChild(ground, roadEdge, roadFill, props, aim, raiders, actors, canopy, air)
+    this.fx = new Container() // dust and such at ground level
+    this.world.addChild(ground, roadEdge, roadFill, props, aim, this.fx, raiders, actors, canopy, air)
     this.aim = aim
 
     this.road = new Road(roadEdge, roadFill)
     this.road.ensureAhead(0)
     this.enemies = new Enemies(raiders)
-    this.encounters = new Encounters(props, this.road, this.enemies)
+    this.encounters = new Encounters(props, raiders, this.road, this.enemies)
     this.encounters.place()
-    this.scenery = new Scenery(ground, canopy, this.road, () => this.encounters.zones)
+    this.scenery = new Scenery(ground, raiders, this.road, () => this.encounters.zones) // trees stand among the people
     this.encounters.onNewZones = (zones) => this.scenery.clear(zones)
     this.scenery.update(0)
     this.stones = new Stones(air)
@@ -101,7 +109,7 @@ export class Game {
     this.pickups = []
 
     const start = this.road.points[3]
-    this.cart = new HorseCart(actors, start.x, start.y, -Math.PI / 2)
+    this.cart = new HorseCart(raiders, start.x, start.y, -Math.PI / 2) // depth-sorted with the people
     this.peasant = new Peasant(raiders) // among the raiders, so they overlap by depth
     this.marker = new Graphics()
     actors.addChild(this.marker)
@@ -113,6 +121,12 @@ export class Game {
     this.stamina = 1
     this.staminaRest = 0
     this.winded = false
+    this.breath = 1 // the peasant's stamina, 0..1
+    this.breathRest = 0
+    this.outOfBreath = false
+    this.dashCooldown = 0
+    this.dashGuard = 0 // untouchable while dashing
+    this.puffs = []
     this.throwCooldown = 0
     this.invulnerable = 0
     this.shake = 0
@@ -160,6 +174,8 @@ export class Game {
       right: this.input.is('right'),
     }
     keys.boost = this.updateStamina(dt, keys)
+    if (!this.onFoot) this.updateBreath(dt, keys)
+    this.updatePuffs(dt)
     const obstacles = [...this.scenery.obstacles, ...this.encounters.obstacles]
     const interaction = this.interaction()
     if (this.input.pressed('interact') && interaction) interaction.act()
@@ -185,7 +201,9 @@ export class Game {
     if (this.onFoot) {
       const aim = this.pointerWorld()
       const cartSolids = this.cart.bodies().map((b) => ({ x: b.x, y: b.y, radius: b.r }))
-      this.peasant.update(dt, keys, aim.x, aim.y, [...obstacles, ...cartSolids])
+      const sprinting = this.updateBreath(dt, keys)
+      this.peasant.update(dt, keys, aim.x, aim.y, [...obstacles, ...cartSolids], sprinting)
+      if (this.peasant.dashing && Math.random() < 0.6) this.puff(this.peasant.x, this.peasant.y)
     }
 
     if (onMainRoad) this.best = Math.max(this.best, near.along)
@@ -225,6 +243,10 @@ export class Game {
     this.drawMarker(this.interaction())
 
     this.updateStage(dt, metres)
+    // Trees between you and the camera fade so you can see yourself
+    const me = this.player()
+    this.scenery.fadeAround(me.x, me.y)
+    this.encounters.fadeAround(me.x, me.y)
     this.updateCamera(dt)
     if (this.toast && (this.toast.t -= dt) <= 0) this.toast = null
     this.onHud({
@@ -240,6 +262,9 @@ export class Game {
       maxCartHealth: MAX_CART_HEALTH,
       stamina: this.stamina,
       winded: this.winded,
+      breath: this.breath,
+      outOfBreath: this.outOfBreath,
+      sprinting: this.onFoot && this.input.is('boost') && !this.outOfBreath && this.breath > 0,
       galloping: keys.boost,
       equipment: SLOTS.map((slot) => ({ slot, label: SLOT_NAMES[slot], item: this.equipment[slot] })),
       bare: BARE,
@@ -697,12 +722,16 @@ export class Game {
   updateHeldWeapon(dt) {
     const melee = this.equipment.melee
     const ranged = this.equipment.ranged
-    const loaded = this.ammoCount(this.ranged.ammo) > 0 && this.throwCooldown <= 0
+    const stocked = this.ammoCount(this.ranged.ammo) > 0
+    // The next shot is drawn back as the weapon reloads: full draw = ready
+    const draw = Math.min(1, Math.max(0, 1 - this.throwCooldown / this.ranged.cooldown))
     const { weapon, bow } = this.cart.cart
     // Only the weapon in hand is drawn; the other is slung on your back.
     const inHand = this.active
+    const rangedInHand = inHand === 'ranged' ? ranged : null
     for (const holder of [this.peasant.weapon, weapon]) holder.set(inHand === 'melee' ? melee : null)
-    for (const holder of [this.peasant.bow, bow]) holder.set(inHand === 'ranged' ? ranged : null, loaded)
+    this.peasant.bow.set(rangedInHand, stocked, draw)
+    bow.set(rangedInHand, stocked && draw >= 1)
     if (!this.onFoot) {
       const aim = this.pointerWorld()
       const { cartX, cartY, cartHeading } = this.cart
@@ -827,6 +856,65 @@ export class Game {
     g.rotation = s.facing
     this.air.addChild(g)
     this.swings.push({ g, t: 0, life: s.fx === 'heavy' ? 0.28 : s.fx === 'jab' ? 0.14 : 0.16 })
+  }
+
+  // The peasant's stamina on foot: Shift sprints (draining it while you
+  // move), Ctrl or Space dashes (a chunk at once). Empty it and you're out of
+  // breath until it's back to a third. Returns whether you're sprinting.
+  updateBreath(dt, keys) {
+    this.dashCooldown -= dt
+    this.dashGuard -= dt
+    const moving = keys.up || keys.down || keys.left || keys.right
+    let spent = false
+    if (this.onFoot && this.input.pressed('dash') && this.dashCooldown <= 0 && !this.peasant.dashing) {
+      if (this.breath >= DASH_COST) {
+        // Along the keys held, or towards the mouse if standing still
+        const aim = this.pointerWorld()
+        const dx = moving ? (keys.right ? 1 : 0) - (keys.left ? 1 : 0) : aim.x - this.peasant.x
+        const dy = moving ? (keys.down ? 1 : 0) - (keys.up ? 1 : 0) : aim.y - this.peasant.y
+        this.peasant.dash(dx, dy)
+        this.breath -= DASH_COST
+        this.dashCooldown = DASH_COOLDOWN
+        this.dashGuard = DASH_TIME + 0.05
+        spent = true
+        for (let k = 0; k < 4; k++) this.puff(this.peasant.x, this.peasant.y)
+      } else {
+        this.say('Too out of breath to dash')
+      }
+    }
+    const sprinting = this.onFoot && this.input.is('boost') && moving && !this.outOfBreath && this.breath > 0
+    if (sprinting) {
+      this.breath = Math.max(0, this.breath - SPRINT_DRAIN * dt)
+      spent = true
+    }
+    if (spent) {
+      this.breathRest = 0
+      if (this.breath <= 0) this.outOfBreath = true
+    } else {
+      this.breathRest += dt
+      if (this.breathRest > BREATH_REGEN_DELAY) this.breath = Math.min(1, this.breath + BREATH_REGEN * dt)
+      if (this.outOfBreath && this.breath >= 0.33) this.outOfBreath = false
+    }
+    return sprinting
+  }
+
+  // Dust kicked up from the feet.
+  puff(x, y) {
+    const g = new Graphics().circle(0, 0, 2.5 + Math.random() * 2).fill({ color: '#c9ad80', alpha: 0.6 })
+    g.position.set(x + (Math.random() - 0.5) * 10, y + (Math.random() - 0.5) * 6)
+    this.fx.addChild(g)
+    this.puffs.push({ g, t: 0 })
+  }
+
+  updatePuffs(dt) {
+    this.puffs = this.puffs.filter((p) => {
+      p.t += dt
+      p.g.scale.set(1 + p.t * 3)
+      p.g.alpha = Math.max(0, 1 - p.t / 0.45)
+      if (p.t < 0.45) return true
+      p.g.destroy()
+      return false
+    })
   }
 
   // Shift gallops while the horse has wind; empty the bar and it's winded
@@ -956,6 +1044,7 @@ export class Game {
   // A blow or an arrow lands: on foot it's you, on the cart it's the cart.
   hurt(damage, faction, arrow) {
     if (this.invulnerable > 0 || this.state === 'over') return
+    if (this.onFoot && this.dashGuard > 0) return // dashed clear of it
     // Armour only protects the peasant, not the cart.
     if (this.onFoot && Math.random() < blockChance(this.equipment)) {
       this.blockFlash = 0.25

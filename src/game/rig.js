@@ -39,7 +39,7 @@ const ease = (t) => 1 - (1 - t) * (1 - t)
 
 // Two-bone limb: where the middle joint sits, bending towards `bend`
 // (+1 forwards, -1 backwards) in the limb's own vertical plane.
-function joint(from, to, upper, lower, bend) {
+export function joint(from, to, upper, lower, bend) {
   const da = to.a - from.a
   const dz = to.z - from.z
   const db = to.b - from.b
@@ -76,6 +76,12 @@ export class Rig {
     this.offhand = null // bow, crossbow, sling, shield
     this.loaded = true // an arrow nocked on the bow
     this.aiming = false
+    this.pull = 0 // how far the bow (or crossbow) string is drawn back, 0..1
+    this.spin = 0 // a sling's whirl
+    this.lean = 0 // leaning into a sprint or dash, 0..1
+    this.seated = false // sitting (on the cart's bench), hips at `seatZ`
+    this.seatZ = 0
+    this.wave = 0 // waving (a villager's greeting), 0 for not; counts up while waving
     this.move = null // a player's attack: { name, t, back, windup }
     this.strike = null // a raider's attack: { phase, p }
     this.trail = null // the arc of a swing, while it lasts
@@ -158,7 +164,10 @@ export class Rig {
       this.speed = speed
       this.phase += (speed * dt) / (5.5 * this.k)
       if (this.move) this.move.t += dt
+      if (this.wave) this.wave += dt
       this.kick = Math.max(0, this.kick - dt * 6)
+      // A sling whirls faster the closer it is to being let fly
+      if (this.offhand === 'sling' && this.aiming) this.spin += dt * (6 + this.pull * 22)
       this.flinch = Math.max(0, this.flinch - dt * 4)
     }
     this.draw()
@@ -170,8 +179,9 @@ export class Rig {
     const B = BODY
     const walk = Math.min(1, this.speed / 40)
     const bob = Math.abs(Math.sin(this.phase)) * 1.2 * walk
-    const lean = -this.flinch * 3 // knocked back on the heels
-    const hipZ = (B.hip + bob - this.flinch * 1.5) * k
+    // Knocked back on the heels by a blow; leaning in to a sprint or dash
+    const lean = -this.flinch * 3 + this.lean * 3.5
+    const hipZ = this.seated ? this.seatZ : (B.hip + bob - this.flinch * 1.5) * k
     const chest = { a: lean * k, b: 0, z: hipZ + B.torso * k }
     const j = {}
     j.neck = add(chest, { a: lean * 0.5 * k, b: 0, z: B.neck * 0.3 * k })
@@ -180,18 +190,23 @@ export class Rig {
     for (const [side, s] of [['L', -1], ['R', 1]]) {
       const legPhase = this.phase + (s > 0 ? Math.PI : 0)
       const hip = { a: 0, b: s * B.hipW * k, z: hipZ }
-      const foot = {
-        a: Math.sin(legPhase) * B.stride * walk * k,
-        b: s * B.hipW * k,
-        z: Math.max(0, Math.cos(legPhase)) * B.lift * walk * k,
-      }
+      // Sitting: feet planted on the footboard in front
+      const foot = this.seated
+        ? { a: 6 * k, b: s * (B.hipW + 0.5) * k, z: hipZ - 9 * k }
+        : {
+            a: Math.sin(legPhase) * B.stride * walk * k,
+            b: s * B.hipW * k,
+            z: Math.max(0, Math.cos(legPhase)) * B.lift * walk * k,
+          }
       j['hip' + side] = hip
       j['foot' + side] = foot
       j['knee' + side] = joint(hip, foot, B.thigh * k, B.shin * k, 1)
       const sh = { a: chest.a, b: s * B.shoulderW * k, z: chest.z - 1 * k }
       j['sh' + side] = sh
-      // Hanging, swinging opposite the legs
-      j['hand' + side] = {
+      // Hanging, swinging opposite the legs (or holding the reins out in front)
+      j['hand' + side] = this.seated
+        ? { a: 7 * k, b: s * 3 * k, z: hipZ + 6 * k }
+        : {
         a: sh.a - Math.sin(legPhase) * 3.5 * walk * k + 1.5 * k,
         b: s * (B.shoulderW + 1.2) * k,
         z: sh.z - (B.upperArm + B.foreArm - 2.5) * k,
@@ -199,13 +214,29 @@ export class Rig {
     }
 
     // Weapon hand (right)
-    const weapon = this.weaponHand(j.shR)
-    j.handR = weapon.hand
+    let weapon = this.weaponHand(j.shR)
+    // (A seated driver with nothing in hand keeps it on the reins)
+    if (!(this.seated && !this.weapon && !this.move && !this.strike)) j.handR = weapon.hand
     // Off hand (left): a bow held up to shoot, or a shield held before you
     if (this.offhand === 'shield') {
       j.handL = { a: j.shL.a + 7 * k, b: -3 * k, z: j.shL.z - 4 * k }
     } else if (this.offhand && (this.aiming || this.offhand === 'crossbow')) {
       j.handL = { a: j.shL.a + (10 - this.kick * 2) * k, b: -1.5 * k, z: j.shL.z - 1 * k }
+    }
+    // Drawing a bow: the right hand pulls the string back towards the cheek.
+    // Spanning a crossbow: hauls the string back to the latch, then takes
+    // the stock once it's cocked.
+    const drawing = this.aiming && !this.move && !this.strike
+    if (drawing && this.offhand === 'bow') {
+      j.handR = add(j.handL, { a: -(2 + this.pull * 8) * k, b: 1 * k, z: (1 + this.pull) * k })
+      weapon = { hand: j.handR, dir: weapon.dir }
+    } else if (drawing && this.offhand === 'crossbow') {
+      j.handR = add(j.handL, { a: -(this.pull < 1 ? this.pull * 6 : 6) * k, b: 1.5 * k, z: this.pull < 1 ? 1.5 * k : -1 * k })
+      weapon = { hand: j.handR, dir: weapon.dir }
+    }
+    // Waving: the right hand up above the head, swaying side to side
+    if (this.wave && !this.weapon) {
+      j.handR = { a: 2 * k, b: (B.shoulderW + 2.5 + Math.sin(this.wave * 9) * 2.5) * k, z: chest.z + 8 * k }
     }
     for (const [side, bend] of [['L', -1], ['R', -1]]) {
       j['elb' + side] = joint(j['sh' + side], j['hand' + side], B.upperArm * k, B.foreArm * k, bend)
@@ -365,7 +396,7 @@ export class Rig {
     // Shadow on the ground under the body
     const cx = (pts.hipL.x + pts.hipR.x) / 2
     const cy = (pts.hipL.d + pts.hipR.d) / 2
-    if (!this.ragdoll) g.ellipse(cx, cy, 7 * k, 3 * k).fill({ color: '#000', alpha: 0.25 })
+    if (!this.ragdoll && !this.seated) g.ellipse(cx, cy, 7 * k, 3 * k).fill({ color: '#000', alpha: 0.25 })
 
     // Parts, drawn far to near
     const parts = []
@@ -394,6 +425,12 @@ export class Rig {
         g.poly([pts.shL.x, pts.shL.y, pts.shR.x, pts.shR.y, pts.hipR.x, pts.hipR.y, pts.hipL.x, pts.hipL.y]).fill(st.shirt)
         // Belt
         g.moveTo(pts.hipL.x, pts.hipL.y).lineTo(pts.hipR.x, pts.hipR.y).stroke({ width: 2 * k, color: '#2b221c', cap: 'round' })
+        if (st.extras?.includes('apron')) {
+          const lo = (p, t) => ({ x: lerp(neck.x, p.x, t), y: lerp(neck.y, p.y, t) + 4 * k * t })
+          const [a, b] = [lo(pts.hipL, 1.15), lo(pts.hipR, 1.15)]
+          g.poly([lerp(pts.shL.x, pts.hipL.x, 0.4), lerp(pts.shL.y, pts.hipL.y, 0.4), lerp(pts.shR.x, pts.hipR.x, 0.4), lerp(pts.shR.y, pts.hipR.y, 0.4), b.x, b.y, a.x, a.y])
+          g.fill(st.apron ?? '#d8cfb4')
+        }
         if (st.extras?.includes('cape')) {
           g.poly([pts.shL.x, pts.shL.y, pts.shR.x, pts.shR.y, pts.hipR.x, pts.hipR.y + 3 * k, pts.hipL.x, pts.hipL.y + 3 * k])
           g.fill({ color: st.capeColour, alpha: 0.9 })
@@ -473,6 +510,17 @@ export class Rig {
         }
         g.rect(at.x - r * 0.9, at.y - r * 1.0, r * 1.8, r * 0.35).fill('#3a3620') // brow
         break
+      case 'hair':
+        g.circle(at.x - fx * 0.4, at.y - r * 0.25, r * 1.02).fill(st.headColour)
+        if (facesUs) {
+          g.circle(at.x + fx, at.y + r * 0.12, r * 0.72).fill(skin)
+          eyes('#1c1714')
+        }
+        break
+      case 'kerchief':
+        if (facesUs) eyes('#1c1714')
+        g.ellipse(at.x - fx * 0.3, at.y - r * 0.45, r * 1.08, r * 0.7).fill(st.headColour)
+        break
       default:
         eyes('#1c1714')
     }
@@ -541,32 +589,48 @@ export class Rig {
       return
     }
     if (kind === 'bow') {
-      // Held upright; the string drawn back to the cheek while aiming
-      const top = { x: h.x, y: h.y - 10 * k }
-      const bottom = { x: h.x, y: h.y + 8 * k }
-      const bulge = { x: h.x + f.x * 5 * k, y: h.y - 1 * k + f.y * 2 * k }
+      // Held upright. While aiming, the string is drawn back with the arrow
+      // nocked (`draw` 0..1); just after a shot it shivers.
+      const drawn = this.aiming ? this.pull : 0
+      const bend = 5 + drawn * 2 // the limbs flex as it's drawn
+      const top = { x: h.x - f.x * drawn * 1.5 * k, y: h.y - (10 - drawn) * k }
+      const bottom = { x: h.x - f.x * drawn * 1.5 * k, y: h.y + (8 - drawn) * k }
+      const bulge = { x: h.x + f.x * bend * k, y: h.y - 1 * k + f.y * 2 * k }
       g.moveTo(top.x, top.y).quadraticCurveTo(bulge.x, bulge.y, bottom.x, bottom.y).stroke({ width: 1.8 * k, color: '#8b6236', cap: 'round' })
-      const pull = this.aiming && this.loaded ? 6 : 0
+      const shiver = this.kick > 0 ? Math.sin(this.kick * 40) * this.kick * 2 : 0
+      const pull = drawn * 9 - shiver
       const nock = { x: h.x - f.x * pull * k, y: h.y - 1 * k - f.y * pull * 0.5 * k }
       g.moveTo(top.x, top.y).lineTo(nock.x, nock.y).lineTo(bottom.x, bottom.y).stroke({ width: 0.8, color: '#e8e0c8' })
-      if (this.aiming && this.loaded) {
-        g.moveTo(nock.x, nock.y).lineTo(h.x + f.x * 9 * k, h.y - 1 * k + f.y * 4 * k).stroke({ width: 1.2 * k, color: '#8b6236' })
-        g.circle(h.x + f.x * 9 * k, h.y - 1 * k + f.y * 4 * k, 1.2 * k).fill('#d8dde2')
+      if (this.aiming && this.loaded && drawn > 0.1) {
+        const tip = { x: nock.x + f.x * 14 * k, y: nock.y + f.y * 6 * k }
+        g.moveTo(nock.x, nock.y).lineTo(tip.x, tip.y).stroke({ width: 1.2 * k, color: '#8b6236' })
+        g.circle(tip.x, tip.y, 1.2 * k).fill('#d8dde2')
       }
       return
     }
     if (kind === 'crossbow') {
+      // Spanned by hauling the string back to the latch; the bolt goes on
+      // once it's cocked
       g.moveTo(h.x - f.x * 4 * k, h.y - f.y * 2 * k).lineTo(h.x + f.x * 9 * k, h.y + f.y * 4 * k).stroke({ width: 3 * k, color: '#6e4a28', cap: 'round' })
       const px = h.x + f.x * 7 * k
       const py = h.y + f.y * 3 * k
-      g.moveTo(px - f.y * 7 * k, py + f.x * 3 * k - 1).lineTo(px + f.y * 7 * k, py - f.x * 3 * k - 1).stroke({ width: 2 * k, color: '#b9c0c8', cap: 'round' })
-      if (this.loaded) g.moveTo(h.x, h.y).lineTo(px, py).stroke({ width: 1.2 * k, color: '#5e3f22' })
+      const cocked = this.aiming ? this.pull : 1
+      const sx = px - f.x * cocked * 6 * k
+      const sy = py - f.y * cocked * 3 * k
+      g.moveTo(px - f.y * 7 * k, py + f.x * 3 * k - 1).quadraticCurveTo(px + f.x * 2 * k, py + f.y * 1 * k, px + f.y * 7 * k, py - f.x * 3 * k - 1)
+      g.stroke({ width: 2 * k, color: '#b9c0c8', cap: 'round' })
+      g.moveTo(px - f.y * 7 * k, py + f.x * 3 * k - 1).lineTo(sx, sy).lineTo(px + f.y * 7 * k, py - f.x * 3 * k - 1).stroke({ width: 0.8, color: '#e8e0c8' })
+      if (this.loaded && cocked >= 1) g.moveTo(sx, sy).lineTo(px + f.x * 3 * k, py + f.y * 1.5 * k).stroke({ width: 1.4 * k, color: '#5e3f22' })
       return
     }
     if (kind === 'sling') {
-      g.moveTo(h.x, h.y).lineTo(h.x + 1 * k, h.y + 6 * k).stroke({ width: 0.8, color: '#c9b28a' })
-      g.ellipse(h.x + 1 * k, h.y + 7 * k, 2 * k, 1.6 * k).fill('#6e4a28')
-      if (this.loaded) g.circle(h.x + 1 * k, h.y + 7 * k, 1.2 * k).fill('#9a968c')
+      // Whirled round the hand, faster as the throw comes
+      const r = (this.aiming ? 4 + this.pull * 3 : 0) * k
+      const px = h.x + Math.cos(this.spin) * r
+      const py = h.y + (this.aiming ? Math.sin(this.spin) * r * 0.5 - 6 * k : 6 * k)
+      g.moveTo(h.x, h.y).lineTo(px, py).stroke({ width: 0.8, color: '#c9b28a' })
+      g.ellipse(px, py, 2 * k, 1.6 * k).fill('#6e4a28')
+      if (this.loaded) g.circle(px, py, 1.2 * k).fill('#9a968c')
     }
   }
 }

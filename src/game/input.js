@@ -7,7 +7,8 @@ const KEYS = {
   interact: ['KeyE'],
   bag: ['KeyB', 'KeyI'],
   cart: ['KeyC'],
-  boost: ['ShiftLeft', 'ShiftRight'],
+  boost: ['ShiftLeft', 'ShiftRight'], // gallop on the cart, sprint on foot
+  dash: ['ControlLeft', 'ControlRight', 'Space'],
   swap: ['KeyQ', 'MouseRight'],
   close: ['Escape'],
 }
@@ -49,7 +50,9 @@ export class Input {
     this.onDown = (e) => {
       if (!e.repeat) this.justPressed.add(e.code)
       this.held.add(e.code)
-      if (Object.values(KEYS).flat().includes(e.code)) e.preventDefault()
+      // Our keys shouldn't scroll or trigger browser shortcuts (Ctrl+S, Ctrl+D...;
+      // browsers never let a page stop Ctrl+W closing the tab)
+      if (Object.values(KEYS).flat().includes(e.code) || e.ctrlKey) e.preventDefault()
     }
     this.onUp = (e) => this.held.delete(e.code)
     this.onBlur = () => {

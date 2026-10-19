@@ -92,7 +92,7 @@ function drawRoute(road, points, colours) {
 
 // A fingerpost by the junction. The board stays level so it's easy to
 // read, and points left or right toward the turning.
-function signpost(view, x, y, pointsLeft, title, metres, hostile) {
+function signpost(stand, x, y, pointsLeft, title, metres, hostile) {
   const post = new Container()
   const g = new Graphics()
   g.circle(2, 2, 4).fill({ color: '#000', alpha: 0.25 })
@@ -109,8 +109,7 @@ function signpost(view, x, y, pointsLeft, title, metres, hostile) {
   if (hostile) board.circle(125, -20, 5).fill('#e8e0c8')
   if (pointsLeft) board.scale.x = -1
   post.addChild(g, board, label)
-  post.position.set(x, y)
-  view.addChild(post)
+  stand(post, x, y)
 }
 
 // A side road off main-road point `i` leading to a big destination, or null
@@ -141,7 +140,7 @@ export function sideRoad(ctx) {
   const sx = p.x + n.x * route.side * (ROAD_WIDTH / 2 + 70) + d.x * 80
   const sy = p.y + n.y * route.side * (ROAD_WIDTH / 2 + 70) + d.y * 80
   const length = Math.round((route.points.length * SEGMENT + DEST_RADIUS) / PX_PER_METRE)
-  signpost(view, sx, sy, route.points[6].x < p.x, dest.title, length, dest.hostile)
+  signpost(ctx.stand, sx, sy, route.points[6].x < p.x, dest.title, length, dest.hostile)
 
   return {
     ...dest,
