@@ -6,6 +6,7 @@ const KEYS = {
   restart: ['Space', 'KeyR'],
   interact: ['KeyE'],
   bag: ['KeyB', 'KeyI'],
+  cart: ['KeyC'],
   boost: ['ShiftLeft', 'ShiftRight'],
   swap: ['KeyQ', 'MouseRight'],
   close: ['Escape'],
@@ -16,10 +17,13 @@ export class Input {
     this.canvas = canvas
     this.held = new Set()
     this.justPressed = new Set()
-    this.pointer = { x: 0, y: 0, down: false, rightDown: false, active: false }
+    // `active`: the mouse has been over the game at least once;
+    // `inside`: it's over the game right now (not off-window or over a panel)
+    this.pointer = { x: 0, y: 0, down: false, rightDown: false, active: false, inside: false }
     this.onPointerMove = (e) => {
       const rect = canvas.getBoundingClientRect()
       this.pointer.active = true
+      this.pointer.inside = true
       this.pointer.x = e.clientX - rect.left
       this.pointer.y = e.clientY - rect.top
     }
@@ -36,7 +40,9 @@ export class Input {
       if (e.button === 2) this.pointer.rightDown = false
     }
     this.onContextMenu = (e) => e.preventDefault() // right-click swaps weapons
+    this.onPointerLeave = () => (this.pointer.inside = false)
     canvas.addEventListener('pointermove', this.onPointerMove)
+    canvas.addEventListener('pointerleave', this.onPointerLeave)
     canvas.addEventListener('pointerdown', this.onPointerDown)
     canvas.addEventListener('contextmenu', this.onContextMenu)
     window.addEventListener('pointerup', this.onPointerUp)
@@ -71,6 +77,7 @@ export class Input {
 
   destroy() {
     this.canvas.removeEventListener('pointermove', this.onPointerMove)
+    this.canvas.removeEventListener('pointerleave', this.onPointerLeave)
     this.canvas.removeEventListener('pointerdown', this.onPointerDown)
     this.canvas.removeEventListener('contextmenu', this.onContextMenu)
     window.removeEventListener('pointerup', this.onPointerUp)

@@ -18,3 +18,34 @@ body,
 body {
   overflow: hidden;
 }
+
+/* Grim medieval pixel-art interface: pixel fonts, hard square frames of
+   soot and old bronze. */
+:root {
+  --font-ui: 'Pixelify Sans', ui-monospace, monospace;
+  --font-title: 'Jacquard 24', 'Pixelify Sans', serif;
+  --panel: #1c1714f0;
+  --ink: #0e0b0a;
+  --frame: #54402f;
+  --frame-light: #8a6c4b;
+}
+
+html {
+  -webkit-font-smoothing: none;
+  font-smooth: never;
+}
+
+.stat,
+.vitals,
+.controls,
+.equipment,
+.inventory,
+.trade,
+.toast,
+.prompt {
+  border: 2px solid var(--ink);
+  box-shadow:
+    inset 0 0 0 2px var(--frame),
+    inset 2px 2px 0 2px var(--frame-light),
+    0 3px 0 var(--ink);
+}

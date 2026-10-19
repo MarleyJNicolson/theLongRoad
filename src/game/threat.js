@@ -15,7 +15,6 @@ export const BIOMES = [
     leaf: '#4c8a3a',
     bush: ['#467a32', '#4f8a38', '#3f7030'],
     grass: '#4e8a36',
-    scenery: { tree: 0.3, bush: 0.2, rock: 0.12 },
     weights: {},
   },
   {
@@ -27,7 +26,6 @@ export const BIOMES = [
     leaf: '#2f6530',
     bush: ['#2f5a28', '#356530', '#294f24'],
     grass: '#356a2c',
-    scenery: { tree: 0.55, bush: 0.2, rock: 0.08 },
     weights: { goblinCamp: 1.8, goblinBurrows: 1.8, goblinLooters: 1.5, goblinHouseRaid: 1.2, banditCamp: 0.5, banditRoadblock: 0.5, banditAmbush: 0.6, banditHouseRaid: 0.4 },
   },
   {
@@ -39,19 +37,17 @@ export const BIOMES = [
     leaf: '#8a9448',
     bush: ['#8a8a48', '#7d7d40', '#96904e'],
     grass: '#8c8442',
-    scenery: { tree: 0.08, bush: 0.18, rock: 0.3 },
     weights: { banditCamp: 1.8, banditRoadblock: 1.6, banditAmbush: 1.5, banditHouseRaid: 1.3, goblinCamp: 0.5, goblinBurrows: 0.5, goblinLooters: 0.6, goblinHouseRaid: 0.4 },
   },
   {
     name: 'The Frostmarch',
     tagline: 'Cold hills where everything is hungry',
     ground: 0xc9d3cf,
-    road: { edge: '#6f6a62', fill: '#a49c8e', rut: '#8a8478', crown: '#b8b2a6' },
+    road: { edge: '#7c848f', fill: '#a7aeb6', rut: '#6e553c', crown: '#d9dee2' }, // slush, with mud in the ruts
     trees: ['#2e4a3e', '#35543f', '#2a4438'],
     leaf: '#e8eef0',
     bush: ['#7d8c84', '#8a998f', '#71807a'],
     grass: '#9aa8a0',
-    scenery: { tree: 0.35, bush: 0.12, rock: 0.25 },
     weights: { goblinCamp: 1.3, banditCamp: 1.3, banditRoadblock: 1.2, goblinBurrows: 1.1 },
   },
 ]
@@ -82,6 +78,8 @@ export function threatAt(metres) {
     speedMult: 1 + Math.min(0.25, km * 0.03),
     // Blows land harder deeper in
     damage: 1 + Math.floor(km / 6),
+    // Share of ordinary raiders who carry bows instead
+    archerChance: Math.min(0.3, 0.12 + km * 0.02),
     // Bigger, tougher raiders worth more gold
     eliteChance: Math.min(0.45, Math.max(0, km - 1) * 0.05),
     // Room for bigger groups than the base caps allow

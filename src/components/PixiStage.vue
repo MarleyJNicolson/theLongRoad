@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, reactive, useTemplateRef } from 'vue'
 import { Application } from 'pixi.js'
 import { Game } from '../game/Game.js'
+import { PIXEL_SIZE, createPixelArtFilter } from '../game/pixelArt.js'
 import EquipmentPanel from './EquipmentPanel.vue'
 import InventoryPanel from './InventoryPanel.vue'
 import TradePanel from './TradePanel.vue'
@@ -27,12 +28,15 @@ const hud = reactive({
   block: 0,
   bag: [],
   bagOpen: false,
+  cartStore: [],
+  cartOpen: false,
+  nearCart: true,
   active: 'ranged',
   trade: null,
-  ammo: 8,
+  ammo: 0,
+  ammoFrom: 'cart + bag',
   ammoKind: 'stones',
   ammoName: 'Stones',
-  maxAmmo: 8,
   kills: 0,
   gold: 0,
   onFoot: false,
@@ -44,19 +48,47 @@ const hud = reactive({
 })
 let app
 let game
+let resizeObserver
 
 onMounted(async () => {
   app = new Application()
+  // Render at a fraction of the screen's resolution and let the browser scale
+  // it up without smoothing: each art pixel covers a whole number of device
+  // pixels (PIXEL_SIZE screen pixels, near enough on high-DPI displays).
+  const dpr = window.devicePixelRatio || 1
+  const devicePixelsPerArtPixel = Math.max(1, Math.round(PIXEL_SIZE * dpr))
+  // Pixel fonts must be ready before any in-world text is drawn.
+  await Promise.all(['16px "Pixelify Sans"', '16px "Jacquard 24"'].map((f) => document.fonts.load(f).catch(() => {})))
   await app.init({
-    resizeTo: container.value,
-    background: '#5f9a45',
-    antialias: true,
+    preference: 'webgl',
+    background: '#0e0b0a',
+    antialias: false,
+    resolution: dpr / devicePixelsPerArtPixel,
+    autoDensity: true,
+    roundPixels: true,
   })
+  app.pixelSize = devicePixelsPerArtPixel / dpr // art pixel size in screen units
   container.value.appendChild(app.canvas)
+
+  // Size the game to a whole number of art pixels. An odd window size would
+  // otherwise leave a half art pixel over, misaligning the pixel grid; the
+  // pixel-art pass then rounds differently on each half of the screen and
+  // shows a seam along the diagonal.
+  const fit = () => {
+    const cols = Math.floor((container.value.clientWidth * dpr) / devicePixelsPerArtPixel)
+    const rows = Math.floor((container.value.clientHeight * dpr) / devicePixelsPerArtPixel)
+    app.renderer.resize(cols * app.pixelSize, rows * app.pixelSize)
+  }
+  fit()
+  resizeObserver = new ResizeObserver(fit)
+  resizeObserver.observe(container.value)
+  app.stage.filters = [createPixelArtFilter()]
+  app.stage.filterArea = app.screen
   game = new Game(app, (state) => Object.assign(hud, state))
 })
 
 onUnmounted(() => {
+  resizeObserver?.disconnect()
   game?.destroy()
   app?.destroy(true, { children: true })
 })
@@ -93,7 +125,9 @@ onUnmounted(() => {
     </div>
     <div class="row">
       <label>{{ hud.ammoName }}</label>
-      <span v-for="i in hud.maxAmmo" :key="hud.ammoKind + i" class="pebble" :class="[hud.ammoKind, { lost: i > hud.ammo }]"></span>
+      <span class="pebble" :class="hud.ammoKind"></span>
+      <b class="ammo-count" :class="{ empty: !hud.ammo }">{{ hud.ammo }}</b>
+      <small class="ammo-from">from {{ hud.ammoFrom }}</small>
     </div>
   </div>
 
@@ -107,15 +141,32 @@ onUnmounted(() => {
     :active="hud.active"
     @unequip="(slot) => game?.unequip(slot)"
     @toggle-bag="game?.toggleBag()"
+    :cart-open="hud.cartOpen"
+    :near-cart="hud.nearCart"
+    @toggle-cart="game?.toggleCart()"
   />
   <InventoryPanel
     v-if="hud.bagOpen && !hud.over"
     :bag="hud.bag"
     :gold="hud.gold"
     :equipment="hud.equipment"
+    :cart-open="hud.cartOpen"
     @use="(i) => game?.useBagItem(i)"
     @sell="(i) => game?.sellBagItem(i)"
+    @move="(from, i, to, j) => game?.moveItem(from, i, to, j)"
     @close="game?.toggleBag()"
+  />
+  <InventoryPanel
+    v-if="hud.cartOpen && !hud.over"
+    container="cart"
+    title="Cart storage"
+    :columns="4"
+    close-key="C"
+    :bag="hud.cartStore"
+    :equipment="hud.equipment"
+    @sell="(i) => game?.sellBagItem(i, 'cart')"
+    @move="(from, i, to, j) => game?.moveItem(from, i, to, j)"
+    @close="game?.toggleCart()"
   />
 
   <TradePanel
@@ -138,10 +189,10 @@ onUnmounted(() => {
 
   <div class="controls">
     <template v-if="hud.onFoot">
-      WASD – walk &nbsp;·&nbsp; E – open chest / climb on &nbsp;·&nbsp; Click – attack &nbsp;·&nbsp; Q / right-click – switch weapon &nbsp;·&nbsp; B – bag
+      WASD – walk &nbsp;·&nbsp; E – open chest / climb on &nbsp;·&nbsp; Click – attack &nbsp;·&nbsp; Q / right-click – switch weapon &nbsp;·&nbsp; B – bag &nbsp;·&nbsp; C – cart storage
     </template>
     <template v-else>
-      W / S – faster / slower &nbsp;·&nbsp; Shift – gallop &nbsp;·&nbsp; A / D – steer &nbsp;·&nbsp; E – get off &nbsp;·&nbsp; Click – attack &nbsp;·&nbsp; Q / right-click – switch weapon &nbsp;·&nbsp; B – bag
+      W / S – faster / slower &nbsp;·&nbsp; Shift – gallop &nbsp;·&nbsp; A / D – steer &nbsp;·&nbsp; E – get off &nbsp;·&nbsp; Click – attack &nbsp;·&nbsp; Q / right-click – switch weapon &nbsp;·&nbsp; B – bag &nbsp;·&nbsp; C – cart storage
     </template>
   </div>
 
@@ -159,7 +210,13 @@ onUnmounted(() => {
   width: 100%;
   height: 100vh;
   display: block;
+  overflow: hidden;
+  background: #0e0b0a; /* shows in the sliver left when the game is snapped to whole art pixels */
   cursor: crosshair;
+}
+
+.pixi-container :deep(canvas) {
+  image-rendering: pixelated;
 }
 
 .vitals {
@@ -170,9 +227,9 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
-  background: rgba(40, 26, 12, 0.75);
+  background: var(--panel);
   padding: 8px 12px;
-  border-radius: 6px;
+  border-radius: 0;
   pointer-events: none;
 }
 
@@ -190,7 +247,7 @@ onUnmounted(() => {
 
 .vitals label {
   color: #f3e3c0;
-  font-family: Georgia, serif;
+  font-family: var(--font-ui);
   font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -203,7 +260,7 @@ onUnmounted(() => {
   width: 130px;
   height: 12px;
   background: rgba(0, 0, 0, 0.45);
-  border-radius: 3px;
+  border-radius: 0;
   overflow: hidden;
 }
 
@@ -255,7 +312,7 @@ onUnmounted(() => {
 .pebble.bolts {
   width: 4px;
   height: 16px;
-  border-radius: 1px;
+  border-radius: 0;
   box-shadow: none;
   background: linear-gradient(#b9c0c8 0 22%, #8b6236 22% 80%, #e8e0c8 80%);
 }
@@ -264,6 +321,23 @@ onUnmounted(() => {
   width: 5px;
   height: 12px;
   background: linear-gradient(#b9c0c8 0 25%, #6e4a28 25% 82%, #5e3f22 82%);
+}
+
+.ammo-count {
+  color: #f3e3c0;
+  font-size: 18px;
+  min-width: 26px;
+  text-align: right;
+}
+
+.ammo-count.empty {
+  color: #cf5528;
+}
+
+.ammo-from {
+  color: #f3e3c0;
+  font-size: 10px;
+  opacity: 0.6;
 }
 
 .heart.lost,
@@ -277,15 +351,15 @@ onUnmounted(() => {
   left: 16px;
   display: flex;
   gap: 12px;
-  font-family: Georgia, serif;
+  font-family: var(--font-ui);
   pointer-events: none;
 }
 
 .stat {
-  background: rgba(40, 26, 12, 0.75);
+  background: var(--panel);
   color: #f3e3c0;
   padding: 8px 14px;
-  border-radius: 6px;
+  border-radius: 0;
   font-size: 20px;
   min-width: 120px;
 }
@@ -318,11 +392,11 @@ onUnmounted(() => {
   bottom: 16px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(40, 26, 12, 0.6);
+  background: var(--panel);
   color: #f3e3c0;
   padding: 6px 14px;
-  border-radius: 6px;
-  font-family: Georgia, serif;
+  border-radius: 0;
+  font-family: var(--font-ui);
   font-size: 14px;
   pointer-events: none;
 }
@@ -337,14 +411,15 @@ onUnmounted(() => {
   left: 50%;
   transform: translateX(-50%);
   text-align: center;
-  font-family: Georgia, serif;
+  font-family: var(--font-ui);
   color: #fff4d6;
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
   pointer-events: none;
 }
 
 .banner h2 {
-  font-size: 44px;
+  font-family: var(--font-title);
+  font-size: 64px;
   font-weight: normal;
   letter-spacing: 0.06em;
 }
@@ -373,15 +448,15 @@ onUnmounted(() => {
   left: 50%;
   transform: translateX(-50%);
   padding: 8px 16px;
-  border-radius: 6px;
-  font-family: Georgia, serif;
+  border-radius: 0;
+  font-family: var(--font-ui);
   pointer-events: none;
   white-space: nowrap;
 }
 
 .prompt {
   bottom: 60px;
-  background: rgba(40, 26, 12, 0.85);
+  background: var(--panel);
   color: #fff4d6;
   font-size: 17px;
   border: 1px solid rgba(255, 244, 214, 0.4);
@@ -404,12 +479,15 @@ onUnmounted(() => {
   gap: 10px;
   background: rgba(30, 20, 10, 0.6);
   color: #f3e3c0;
-  font-family: Georgia, serif;
+  font-family: var(--font-ui);
   text-align: center;
 }
 
 .overlay h1 {
-  font-size: 48px;
+  font-family: var(--font-title);
+  font-size: 72px;
+  font-weight: normal;
+  color: #cf5528;
 }
 
 .overlay .hint {

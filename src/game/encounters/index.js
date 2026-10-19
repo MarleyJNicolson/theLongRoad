@@ -1,6 +1,7 @@
 import { SEGMENT } from '../road.js'
 import { rand } from './helpers.js'
 import { stageAt, threatAt } from '../threat.js'
+import { addArrowBarrel } from '../loot.js'
 import { goblinCamp, goblinBurrows, goblinLooters } from './goblins.js'
 import { banditCamp, banditRoadblock, banditAmbush } from './bandits.js'
 import { banditHouseRaid, goblinHouseRaid } from './raids.js'
@@ -120,6 +121,12 @@ export class Encounters {
       }
       enc.index = i
       enc.kind = entry?.kind ?? 'sideRoad'
+      // Wherever archers are posted, their spare arrows are kept to hand.
+      const archer = enc.members.find((m) => m.shoots)
+      if (archer && enc.view) {
+        const a = Math.random() * Math.PI * 2
+        addArrowBarrel((enc.loot ??= []), enc.view, archer.home.x + Math.cos(a) * 30, archer.home.y + Math.sin(a) * 30)
+      }
       this.list.push(enc)
       this.last = entry ?? this.last
       this.nextIndex += Math.floor(threat.spacing * rand(0.85, 1.2))

@@ -72,7 +72,7 @@ export function banditCamp({ layer, road, i, difficulty, extra, enemies }) {
   solids.push({ x: twx, y: twy, radius: 20 })
   layer.addChild(view)
 
-  const members = [enemies.add('bandit', twx, twy, { x: twx, y: twy, facing: Math.atan2(cy - twy, cx - twx) + Math.PI })]
+  const members = [enemies.add('archer', twx, twy, { x: twx, y: twy, facing: Math.atan2(cy - twy, cx - twx) + Math.PI })]
   const sitting = Math.min(5 + extra, 2 + Math.floor(difficulty))
   for (let k = 0; k < sitting; k++) {
     const a = rand(0, Math.PI * 2)

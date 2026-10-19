@@ -9,9 +9,11 @@ const props = defineProps({
   armour: { type: Number, default: 0 },
   block: { type: Number, default: 0 },
   bagOpen: { type: Boolean, default: false },
+  cartOpen: { type: Boolean, default: false },
+  nearCart: { type: Boolean, default: true }, // cart storage only works at the cart
   active: { type: String, default: 'ranged' }, // weapon in hand
 })
-const emit = defineEmits(['unequip', 'toggle-bag'])
+const emit = defineEmits(['unequip', 'toggle-bag', 'toggle-cart'])
 
 const slots = computed(() =>
   Object.fromEntries(
@@ -85,6 +87,25 @@ const ROWS = [
             </svg>
             <span class="slot-label">Bag (B)</span>
           </button>
+          <button
+            v-else-if="r === 1 && c === 2"
+            type="button"
+            class="bag-button"
+            :class="{ open: cartOpen, far: !nearCart }"
+            :title="nearCart ? 'Cart storage (C)' : 'Cart storage – get closer to the cart'"
+            @click="emit('toggle-cart')"
+          >
+            <svg viewBox="0 0 40 40" aria-hidden="true">
+              <rect x="7" y="9" width="5" height="22" rx="1.5" fill="#3a2a1a" />
+              <rect x="28" y="9" width="5" height="22" rx="1.5" fill="#3a2a1a" />
+              <rect x="10" y="6" width="20" height="28" rx="2" fill="#8b6236" stroke="rgba(0,0,0,0.45)" stroke-width="1.2" />
+              <path d="M10 15 H30 M10 24 H30" stroke="#6e4a28" stroke-width="1.5" />
+              <ellipse cx="16" cy="12" rx="4" ry="3.5" fill="#d9b44a" />
+              <ellipse cx="23" cy="20" rx="4" ry="3" fill="#c9b28a" />
+              <path d="M20 34 V39" stroke="#5e3f22" stroke-width="2.5" stroke-linecap="round" />
+            </svg>
+            <span class="slot-label">Cart (C)</span>
+          </button>
           <div v-else-if="r === 3 && c === 1" class="swap-hint">⇄<br />Q</div>
           <div v-else class="gap"></div>
         </template>
@@ -104,10 +125,10 @@ const ROWS = [
   position: fixed;
   left: 16px;
   bottom: 16px;
-  background: rgba(40, 26, 12, 0.8);
-  border-radius: 8px;
+  background: var(--panel);
+  border-radius: 0;
   padding: 10px 12px 12px;
-  font-family: Georgia, serif;
+  font-family: var(--font-ui);
   color: #f3e3c0;
   user-select: none;
 }
@@ -141,7 +162,7 @@ const ROWS = [
   width: 52px;
   height: 52px;
   border: 2px solid;
-  border-radius: 6px;
+  border-radius: 0;
   background: rgba(0, 0, 0, 0.35);
   display: flex;
   align-items: center;
@@ -184,7 +205,7 @@ const ROWS = [
   letter-spacing: 0.06em;
   text-transform: uppercase;
   padding: 1px 4px;
-  border-radius: 3px;
+  border-radius: 0;
   white-space: nowrap;
 }
 
@@ -201,6 +222,10 @@ const ROWS = [
 .bag-button {
   border-color: rgba(243, 227, 192, 0.35);
   border-style: dashed;
+}
+
+.bag-button.far {
+  opacity: 0.4;
 }
 
 .bag-button.open {
@@ -238,7 +263,7 @@ const ROWS = [
   width: 190px;
   background: rgba(30, 20, 10, 0.95);
   border: 1px solid;
-  border-radius: 6px;
+  border-radius: 0;
   padding: 8px 10px;
   display: flex;
   flex-direction: column;

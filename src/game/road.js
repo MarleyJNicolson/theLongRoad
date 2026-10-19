@@ -1,5 +1,6 @@
 import { Container, Graphics, Text } from 'pixi.js'
 import { STAGE_LENGTH, stageAt } from './threat.js'
+import { dirtPattern } from './textures.js'
 
 export const SEGMENT = 30
 export const ROAD_WIDTH = 96
@@ -12,27 +13,28 @@ const AVOID_LOOKAHEAD = 12 // segments ahead the road checks for places to steer
 const PX_PER_METRE = 20
 const MILESTONE_EVERY = 250 // metres
 
-const LABEL = { fontFamily: 'Georgia, serif', fill: '#2a1f14', fontWeight: 'bold' }
+const LABEL = { fontFamily: '"Pixelify Sans", monospace', fill: '#1c1714', fontWeight: '600' }
 
 // A stone by the roadside with the distance carved on it; where a new
 // region begins, a wooden sign naming it as well.
 function milestone(metres) {
   const view = new Container()
   const stone = new Graphics()
-  stone.ellipse(3, 4, 15, 9).fill({ color: '#000', alpha: 0.2 })
-  stone.roundRect(-15, -9, 30, 17, 6).fill('#b9b5aa').stroke({ width: 1.5, color: '#7d7a72' })
-  const label = new Text({ text: `${metres} m`, style: { ...LABEL, fontSize: 10 } })
+  stone.ellipse(4, 6, 30, 16).fill({ color: '#000', alpha: 0.25 })
+  stone.roundRect(-30, -15, 60, 30, 8).fill('#b9b5aa').stroke({ width: 3, color: '#575f6b' })
+  // Big enough to stay legible once drawn at pixel-art resolution
+  const label = new Text({ text: `${metres} m`, style: { ...LABEL, fontSize: 22 } })
   label.anchor.set(0.5)
   view.addChild(stone, label)
 
   if (metres % STAGE_LENGTH === 0) {
     const { name } = stageAt(metres)
     const sign = new Graphics()
-    sign.moveTo(0, -9).lineTo(0, -22).stroke({ width: 3, color: '#5e3f22' })
-    sign.roundRect(-58, -40, 116, 20, 3).fill('#a8875c').stroke({ width: 2, color: '#5e3f22' })
-    const title = new Text({ text: name, style: { ...LABEL, fontSize: 12 } })
+    sign.moveTo(0, -15).lineTo(0, -34).stroke({ width: 5, color: '#5e3f22' })
+    sign.roundRect(-100, -68, 200, 34, 3).fill('#a8875c').stroke({ width: 3, color: '#3d2f25' })
+    const title = new Text({ text: name, style: { ...LABEL, fontSize: 22 } })
     title.anchor.set(0.5)
-    title.y = -30
+    title.y = -51
     view.addChild(sign, title)
   }
   return view
@@ -116,24 +118,66 @@ export class Road {
 
   drawChunk(start, end) {
     const pts = this.points.slice(start, end + 1)
-    const path = (g, offset = 0) => {
+    // A line along the road, `offset` from the centre. `wobble` makes it
+    // wander a little, so edges and ruts aren't ruler-straight. (Smooth in
+    // `along`, so it joins up across chunks.)
+    const path = (g, offset = 0, wobble = 0, seed = 0) => {
       pts.forEach((p, i) => {
         const n = this.normal(start + i)
-        const x = p.x + n.x * offset
-        const y = p.y + n.y * offset
+        const w = wobble * Math.sin(p.along * 0.021 + seed) * Math.sin(p.along * 0.0137 + seed * 2.3)
+        const x = p.x + n.x * (offset + w)
+        const y = p.y + n.y * (offset + w)
         i === 0 ? g.moveTo(x, y) : g.lineTo(x, y)
       })
       return g
     }
-    const style = (width, color, alpha = 1) => ({ width, color, alpha, cap: 'round', join: 'round' })
+    // Textured strokes take their colour from the texture itself
+    const style = (width, color, alpha = 1, textured = false) => {
+      const fill = textured ? dirtPattern(color) : null
+      return { width, color: fill ? 0xffffff : color, alpha, cap: 'round', join: 'round', fill }
+    }
 
     // The road surface changes with the region it runs through.
-    const colours = stageAt(this.points[start].along / 20).biome.road
-    const edge = path(new Graphics()).stroke(style(ROAD_WIDTH + 16, colours.edge))
-    const fill = path(new Graphics()).stroke(style(ROAD_WIDTH, colours.fill))
-    path(fill, -20).stroke(style(6, colours.rut, 0.7))
-    path(fill, 20).stroke(style(6, colours.rut, 0.7))
-    path(fill, 0).stroke(style(14, colours.crown, 0.5))
+    const { biome } = stageAt(this.points[start].along / 20)
+    const colours = biome.road
+
+    // Verge: earth fading into the grass, then a darker, ragged edge
+    const edge = path(new Graphics(), 0, 5, 1).stroke(style(ROAD_WIDTH + 34, colours.edge, 0.3))
+    path(edge, 0, 4, 2).stroke(style(ROAD_WIDTH + 12, colours.edge, 0.9, true))
+
+    // Surface: textured earth, a paler worn crown, wheel ruts with ridges
+    const fill = path(new Graphics()).stroke(style(ROAD_WIDTH, colours.fill, 1, true))
+    path(fill, 0, 6, 3).stroke(style(26, colours.crown, 0.45, true))
+    for (const side of [-1, 1]) {
+      path(fill, side * 21, 2, 4 + side).stroke(style(11, colours.rut, 0.75, true))
+      path(fill, side * 28, 2, 4 + side).stroke(style(2, colours.crown, 0.4))
+    }
+
+    // Pebbles on the road, grass creeping in at the edges, the odd puddle
+    for (let i = 1; i < pts.length; i++) {
+      const p = pts[i]
+      const n = this.normal(start + i)
+      const d = this.direction(start + i)
+      const at = (along, across) => [p.x + d.x * along + n.x * across, p.y + d.y * along + n.y * across]
+      for (let k = 0; k < 3; k++) {
+        const [x, y] = at(Math.random() * SEGMENT, (Math.random() - 0.5) * ROAD_WIDTH * 0.85)
+        fill.circle(x, y, 0.8 + Math.random() * 1.4).fill({ color: Math.random() < 0.5 ? '#7c766c' : colours.edge, alpha: 0.8 })
+      }
+      for (const side of [-1, 1]) {
+        for (let k = 0; k < 2; k++) {
+          const [x, y] = at(Math.random() * SEGMENT, side * (ROAD_WIDTH / 2 - 2 + Math.random() * 10))
+          fill.moveTo(x, y).lineTo(x + (Math.random() - 0.5) * 4, y - 3 - Math.random() * 5)
+        }
+      }
+      fill.stroke({ width: 1.5, color: biome.grass, alpha: 0.9, cap: 'round' })
+      if (biome.name !== 'The Barrens' && Math.random() < 0.035) {
+        // A puddle (ice, up north) lying along one of the ruts
+        const icy = biome.name === 'The Frostmarch'
+        const rut = (Math.random() < 0.5 ? -1 : 1) * 21
+        fill.moveTo(...at(4, rut)).lineTo(...at(26, rut)).stroke({ width: 12, color: icy ? '#a7aeb6' : '#33475a', alpha: 0.85, cap: 'round' })
+        fill.moveTo(...at(9, rut - 2)).lineTo(...at(19, rut - 2)).stroke({ width: 3, color: icy ? '#eef1f2' : '#4d6478', alpha: 0.8, cap: 'round' })
+      }
+    }
 
     // Milestones on the right-hand verge
     const markers = []
@@ -151,6 +195,12 @@ export class Road {
     this.edgeLayer.addChild(edge)
     this.fillLayer.addChild(fill, ...markers)
     this.chunks.push({ end, edge, fill, markers })
+  }
+
+  // Unit vector along the road at point i.
+  direction(i) {
+    const n = this.normal(i)
+    return { x: n.y, y: -n.x }
   }
 
   normal(i) {

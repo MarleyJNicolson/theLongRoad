@@ -1,4 +1,4 @@
-import { Container, Graphics } from 'pixi.js'
+import { Container, Graphics, Sprite, Texture, TilingSprite } from 'pixi.js'
 import { Input } from './input.js'
 import { Road, ROAD_WIDTH } from './road.js'
 import { Scenery } from './scenery.js'
@@ -6,9 +6,12 @@ import { HorseCart } from './cart.js'
 import { Peasant, PEASANT_RADIUS } from './peasant.js'
 import { Enemies } from './enemies.js'
 import { Stones } from './stones.js'
+import { EnemyArrows } from './enemyArrows.js'
 import { Encounters } from './encounters/index.js'
+import { WORLD_ZOOM } from './pixelArt.js'
+import { grassTexture } from './textures.js'
 import { stageAt, threatAt } from './threat.js'
-import { AMMO, BARE, SLOTS, SLOT_NAMES, CONSUMABLES, BAG_SIZE, rollItem, sellValue, totalArmour, blockChance } from './items.js'
+import { AMMO, BARE, SLOTS, SLOT_NAMES, CONSUMABLES, BAG_SIZE, CART_SIZE, rollItem, sellValue, totalArmour, blockChance } from './items.js'
 
 const PX_PER_METRE = 20
 const MAX_HEALTH = 5 // the peasant's hearts, hurt only on foot
@@ -27,6 +30,7 @@ const LOOT_REACH = 34 // how close to stand to search a container
 const MOUNT_REACH = 48 // how close to the cart to climb back on
 const TOAST_TIME = 1.8
 const TRADE_REACH = 46 // how close to stand to a trader
+const STORAGE_REACH = 90 // how close to stand to the cart to use its storage
 
 
 // Blend two 0xRRGGBB colours; snaps to `b` once close enough.
@@ -43,13 +47,26 @@ function mixColour(a, b, t) {
   return done ? b : mixed
 }
 
+// A bag or cart slot as the HUD sees it.
+function snapshot(e) {
+  if (!e) return null
+  return e.type === 'gear'
+    ? { ...e, value: sellValue(e.item) }
+    : { ...e, item: CONSUMABLES[e.type], value: CONSUMABLES[e.type].value }
+}
+
 export class Game {
   constructor(app, onHud) {
     this.app = app
     this.onHud = onHud
     this.input = new Input(app.canvas)
+    // The ground: a screen-filling sheet of grass texture behind the world,
+    // scrolling with it and tinted to the region's colour (part of the
+    // scene, so the pixel-art pass covers it). Plain colour without a canvas.
+    const grass = grassTexture()
+    this.backdrop = grass ? new TilingSprite({ texture: grass }) : new Sprite(Texture.WHITE)
     this.world = new Container()
-    app.stage.addChild(this.world)
+    app.stage.addChild(this.backdrop, this.world)
     this.tick = (ticker) => this.update(Math.min(ticker.deltaMS / 1000, 0.05))
     app.ticker.add(this.tick)
     this.reset()
@@ -79,12 +96,13 @@ export class Game {
     this.encounters.onNewZones = (zones) => this.scenery.clear(zones)
     this.scenery.update(0)
     this.stones = new Stones(air)
+    this.enemyArrows = new EnemyArrows(air)
     this.air = air
     this.pickups = []
 
     const start = this.road.points[3]
     this.cart = new HorseCart(actors, start.x, start.y, -Math.PI / 2)
-    this.peasant = new Peasant(actors)
+    this.peasant = new Peasant(raiders) // among the raiders, so they overlap by depth
     this.marker = new Graphics()
     actors.addChild(this.marker)
     this.onFoot = false
@@ -95,8 +113,6 @@ export class Game {
     this.stamina = 1
     this.staminaRest = 0
     this.winded = false
-    this.ammo = Object.fromEntries(Object.entries(AMMO).map(([kind, a]) => [kind, a.max]))
-    this.refill = Object.fromEntries(Object.keys(AMMO).map((kind) => [kind, 0]))
     this.throwCooldown = 0
     this.invulnerable = 0
     this.shake = 0
@@ -106,9 +122,16 @@ export class Game {
     this.meleeCooldown = 0
     this.active = 'ranged' // which weapon is in hand: 'ranged' or 'melee'
     this.swings = []
+    this.strikes = [] // melee blows waiting to land (see updateMelee)
     this.blockFlash = 0
     this.bag = Array(BAG_SIZE).fill(null)
     this.bagOpen = false
+    this.cartStore = Array(CART_SIZE).fill(null)
+    // Setting out with a few stones to throw
+    this.bag[0] = { type: 'stones', count: 20 }
+    this.cartStore[0] = { type: 'stones', count: 30 }
+    this.outOfAmmoAt = -9
+    this.cartOpen = false
     this.trading = null // the trader whose wares are on show
     this.toast = null
     this.time = 0
@@ -119,7 +142,7 @@ export class Game {
     this.stage = stageAt(0)
     this.banner = { title: this.stage.name, sub: this.stage.biome.tagline, t: STAGE_BANNER_TIME }
     this.groundColour = this.stage.biome.ground
-    this.app.renderer.background.color = this.groundColour
+    this.backdrop.tint = this.groundColour
   }
 
   update(dt) {
@@ -141,9 +164,15 @@ export class Game {
     const interaction = this.interaction()
     if (this.input.pressed('interact') && interaction) interaction.act()
     if (this.input.pressed('bag')) this.toggleBag()
+    if (this.input.pressed('cart')) this.toggleCart()
+    if (this.cartOpen && !this.nearCart()) {
+      this.cartOpen = false
+      this.say('You walk away from the cart')
+    }
     if (this.input.pressed('close')) {
       this.trading = null
       this.bagOpen = false
+      this.cartOpen = false
     }
     if (this.input.pressed('swap')) this.swapWeapon()
 
@@ -165,14 +194,24 @@ export class Game {
     this.road.ensureAhead(this.roadIndex)
     this.road.cull(this.roadIndex)
     this.encounters.place()
-    this.scenery.update(this.roadIndex)
+    this.scenery.update(this.roadIndex, 3)
 
     const player = this.player()
     this.updateThrowing(dt, player)
     this.encounters.update(dt, player, this.roadIndex)
-    const bodies = this.cart.bodies()
+    // On foot, the cart is just in the way and raiders go round it.
+    const bodies = this.cart.bodies().map((b) => ({ ...b, slide: this.onFoot }))
     if (this.onFoot) bodies.push({ x: this.peasant.x, y: this.peasant.y, r: PEASANT_RADIUS })
-    this.enemies.update(dt, player, bodies)
+    // On foot they'll hunt you down however far you go; a cart can outrun them.
+    // Whatever raiders' weapons and arrows can hurt: you on foot, the horse
+    // and cart while you ride.
+    const targets = this.onFoot ? [{ x: this.peasant.x, y: this.peasant.y, r: PEASANT_RADIUS }] : this.cart.bodies()
+    const { volleys, blows } = this.enemies.update(dt, player, bodies, this.onFoot, targets)
+    volleys.forEach((v) => this.enemyArrows.fire(v))
+    for (const blow of blows) this.hurt(blow.damage, blow.faction, false)
+    for (const hit of this.enemyArrows.update(dt, targets, [...this.scenery.obstacles, ...this.encounters.obstacles])) {
+      this.hurt(hit.damage, hit.faction, true)
+    }
     for (const fallen of this.stones.update(dt, this.enemies.list)) this.onKill(fallen)
     this.updateMelee(dt, player)
     this.updateHeldWeapon(dt)
@@ -207,13 +246,14 @@ export class Game {
       armour: totalArmour(this.equipment),
       block: Math.round(blockChance(this.equipment) * 100),
       active: this.active,
-      bag: this.bag.map((e) =>
-        e && (e.type === 'gear' ? { ...e, value: sellValue(e.item) } : { ...e, item: CONSUMABLES[e.type], value: CONSUMABLES[e.type].value }),
-      ),
+      bag: this.bag.map(snapshot),
       bagOpen: this.bagOpen,
+      cartStore: this.cartStore.map(snapshot),
+      cartOpen: this.cartOpen,
+      nearCart: this.nearCart(),
       trade: this.tradeView(),
-      ammo: this.ammo[this.ranged.ammo],
-      maxAmmo: AMMO[this.ranged.ammo].max,
+      ammo: this.ammoCount(this.ranged.ammo),
+      ammoFrom: this.onFoot ? 'bag' : 'cart + bag',
       ammoKind: this.ranged.ammo,
       ammoName: AMMO[this.ranged.ammo].name,
       kills: this.kills,
@@ -239,7 +279,7 @@ export class Game {
     const target = stage.biome.ground
     if (this.groundColour !== target) {
       this.groundColour = mixColour(this.groundColour, target, 1 - Math.exp(-dt * 1.5))
-      this.app.renderer.background.color = this.groundColour
+      this.backdrop.tint = this.groundColour
     }
   }
 
@@ -268,6 +308,9 @@ export class Game {
         bestDist = d
       }
     }
+    if (best?.kind === 'arrows') {
+      return { label: 'E – Take arrows from the barrel', x: best.x, y: best.y, act: () => this.raidBarrel(best) }
+    }
     if (best) {
       return { label: 'E – Open the treasure chest', x: best.x, y: best.y, act: () => this.search(best) }
     }
@@ -280,6 +323,10 @@ export class Game {
         y: trader.y,
         act: () => (this.trading = open ? null : trader),
       }
+    }
+    const rock = this.scenery.gatherableNear(p.x, p.y, LOOT_REACH)
+    if (rock) {
+      return { label: 'E – Gather stones', x: rock.x, y: rock.y, act: () => this.gather(rock) }
     }
     const { cartX, cartY } = this.cart
     if (Math.hypot(cartX - p.x, cartY - p.y) < MOUNT_REACH) {
@@ -322,6 +369,11 @@ export class Game {
     }
     if (found.health) stow({ type: 'poultice', count: 1 }, 'a healing poultice')
     if (found.repair) stow({ type: 'planks', count: 1 }, 'planks & nails')
+    for (const kind of ['arrows', 'bolts']) {
+      if (!found[kind]) continue
+      const lost = this.stash(this.bag, kind, found[kind])
+      parts.push(lost ? `${found[kind] - lost} ${kind} (bag full, ${lost} left behind)` : `${found[kind]} ${kind}`)
+    }
 
     let note = ''
     if (Math.random() < ITEM_CHANCE) {
@@ -349,6 +401,82 @@ export class Game {
     this.say(`Found ${parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts.at(-1) : parts[0]}${note}`, 2)
   }
 
+  // --- Ammunition ------------------------------------------------------------
+
+  // Where you can reach ammunition from: the cart's storage (then your bag)
+  // while riding, only your bag on foot.
+  ammoSources() {
+    return this.onFoot ? [this.bag] : [this.cartStore, this.bag]
+  }
+
+  ammoCount(kind) {
+    return this.ammoSources().reduce((n, list) => n + list.reduce((m, e) => m + (e?.type === kind ? e.count : 0), 0), 0)
+  }
+
+  // Spend one round from the first stack found. False if there's none.
+  takeAmmo(kind) {
+    for (const list of this.ammoSources()) {
+      for (let k = list.length - 1; k >= 0; k--) {
+        const e = list[k]
+        if (e?.type !== kind) continue
+        if (--e.count <= 0) list[k] = null
+        return true
+      }
+    }
+    return false
+  }
+
+  // Put `count` of a stackable into a bag or cart: topping up part stacks
+  // first, then filling empty slots. Returns how many didn't fit.
+  stash(list, type, count) {
+    const max = CONSUMABLES[type].stack
+    for (const e of list) {
+      if (!count) break
+      if (e?.type !== type || e.count >= max) continue
+      const moved = Math.min(max - e.count, count)
+      e.count += moved
+      count -= moved
+    }
+    while (count > 0) {
+      const free = list.indexOf(null)
+      if (free < 0) break
+      const moved = Math.min(max, count)
+      list[free] = { type, count: moved }
+      count -= moved
+    }
+    return count
+  }
+
+  // How many more of a stackable would fit.
+  roomFor(list, type) {
+    const max = CONSUMABLES[type].stack
+    return list.reduce((n, e) => n + (e === null ? max : e.type === type ? max - e.count : 0), 0)
+  }
+
+  // E at a rock or boulder: prise out what stones your bag has room for.
+  gather(rock) {
+    const take = Math.min(rock.gather, this.roomFor(this.bag, 'stones'))
+    if (!take) return this.say('Your bag has no room for more stones')
+    this.stash(this.bag, 'stones', take)
+    this.scenery.quarry(rock, take)
+    this.say(`Gathered ${take} stones${rock.gather ? ` – your bag is full, ${rock.gather} left` : ''}`)
+  }
+
+  // E at an arrow barrel: take what fits, leave the rest in the barrel.
+  raidBarrel(barrel) {
+    const took = []
+    for (const kind of ['arrows', 'bolts']) {
+      const have = barrel.contents[kind]
+      if (!have) continue
+      const left = this.stash(this.bag, kind, have)
+      if (have - left) took.push(`${have - left} ${kind}`)
+      barrel.contents[kind] = left
+    }
+    barrel.update()
+    if (!took.length) return this.say('Your bag is full')
+    this.say(`Took ${took.join(' and ')}${barrel.opened ? '' : ' – your bag is full, some are left'}`)
+  }
+
   // --- Bag -----------------------------------------------------------------
 
   // --- Trading ---------------------------------------------------------------
@@ -369,7 +497,8 @@ export class Game {
         const price = this.priceOf(offer)
         const why = this.cannotBuy(offer, price)
         const item = offer.kind === 'gear' ? offer.item : offer.kind === 'consumable' ? CONSUMABLES[offer.type] : null
-        return { i, kind: offer.kind, type: offer.type, name: item?.name ?? offer.name, item, price, sold: !!offer.sold, why }
+        const name = offer.qty ? `${offer.qty} ${item.name}` : (item?.name ?? offer.name)
+        return { i, kind: offer.kind, type: offer.type, name, item, price, sold: !!offer.sold, why }
       }),
     }
   }
@@ -385,12 +514,9 @@ export class Game {
     if (offer.sold) return 'Sold'
     if (offer.type === 'repair' && this.cartHealth >= MAX_CART_HEALTH) return 'Cart is sound'
     if (offer.type === 'heal' && this.health >= MAX_HEALTH) return 'Already hale'
-    if (offer.type === 'ammo' && Object.entries(AMMO).every(([k, a]) => this.ammo[k] >= a.max)) return 'Quiver full'
     if (price > this.gold) return 'Not enough gold'
-    if (offer.kind !== 'service' && !this.bag.includes(null)) {
-      const stackable = offer.kind === 'consumable' && this.bag.some((e) => e?.type === offer.type && e.count < CONSUMABLES[offer.type].stack)
-      if (!stackable) return 'Bag full'
-    }
+    if (offer.kind === 'gear' && !this.bag.includes(null)) return 'Bag full'
+    if (offer.kind === 'consumable' && this.roomFor(this.bag, offer.type) < (offer.qty ?? 1)) return 'Bag full'
     return ''
   }
 
@@ -405,17 +531,14 @@ export class Game {
       offer.sold = true
       this.say(`Bought ${offer.item.name} – it's in your bag`)
     } else if (offer.kind === 'consumable') {
-      this.addToBag({ type: offer.type, count: 1 })
-      this.say(`Bought a ${CONSUMABLES[offer.type].name}`)
+      this.stash(this.bag, offer.type, offer.qty ?? 1)
+      this.say(`Bought ${offer.qty ?? 'a'} ${CONSUMABLES[offer.type].name}`)
     } else if (offer.type === 'repair') {
       this.cartHealth = MAX_CART_HEALTH
       this.say('The wheelwright sets your cart to rights')
     } else if (offer.type === 'heal') {
       this.health = MAX_HEALTH
       this.say('The healer binds your wounds')
-    } else if (offer.type === 'ammo') {
-      for (const [kind, { max }] of Object.entries(AMMO)) this.ammo[kind] = max
-      this.say('Stones, arrows and bolts restocked')
     }
   }
 
@@ -423,18 +546,85 @@ export class Game {
     this.bagOpen = !this.bagOpen
   }
 
+  // --- Cart storage ----------------------------------------------------------
+
+  // The cart's storage can only be reached from the cart or right beside it.
+  nearCart() {
+    if (!this.onFoot) return true
+    return Math.hypot(this.cart.cartX - this.peasant.x, this.cart.cartY - this.peasant.y) < STORAGE_REACH
+  }
+
+  toggleCart() {
+    if (this.cartOpen) return (this.cartOpen = false)
+    if (!this.nearCart()) return this.say('You need to be at the cart')
+    this.cartOpen = true
+    this.bagOpen = true // so there's somewhere to move things to
+  }
+
+  container(name) {
+    return name === 'cart' ? this.cartStore : this.bag
+  }
+
+  // Pour a stack of supplies into any part-filled stacks of the same kind.
+  // Returns how many are left over.
+  topUp(list, entry) {
+    const max = CONSUMABLES[entry.type].stack
+    for (const other of list) {
+      if (!entry.count) break
+      if (other === entry || other?.type !== entry.type) continue
+      const moved = Math.min(max - other.count, entry.count)
+      other.count += moved
+      entry.count -= moved
+    }
+    return entry.count
+  }
+
+  // Move something between (or within) the bag and the cart. With a slot
+  // `j` it goes there (swapping with whatever is in it); without, it goes
+  // wherever it fits. Anything involving the cart needs you to be at it.
+  moveItem(from, i, to, j = null) {
+    if (this.state === 'over') return
+    if ((from === 'cart' || to === 'cart') && !(this.cartOpen && this.nearCart())) return this.say('You need to be at the cart')
+    const src = this.container(from)
+    const dst = this.container(to)
+    const entry = src[i]
+    if (!entry || (from === to && (j === null || j === i))) return
+    if (j !== null) {
+      const there = dst[j]
+      if (there && there.type === entry.type && entry.type !== 'gear') {
+        // Same supplies: stack them, leaving any overflow where it was
+        const moved = Math.min(CONSUMABLES[entry.type].stack - there.count, entry.count)
+        there.count += moved
+        entry.count -= moved
+        if (!entry.count) src[i] = null
+      } else {
+        dst[j] = entry
+        src[i] = there
+      }
+      return
+    }
+    if (entry.type !== 'gear' && this.topUp(dst, entry) === 0) {
+      src[i] = null
+      return
+    }
+    const free = dst.indexOf(null)
+    if (free < 0) return this.say(to === 'cart' ? 'The cart is full' : 'Your bag is full')
+    dst[free] = entry
+    src[i] = null
+  }
+
   valueOf(entry) {
-    return entry.type === 'gear' ? sellValue(entry.item) : CONSUMABLES[entry.type].value
+    if (entry.type === 'gear') return sellValue(entry.item)
+    const info = CONSUMABLES[entry.type]
+    return info.ammo ? Math.floor((entry.count / 10) * info.value) : info.value
   }
 
   // Stack consumables, otherwise take the first free slot. False if full.
   addToBag(entry) {
     if (entry.type !== 'gear') {
-      const stack = this.bag.find((e) => e?.type === entry.type && e.count < CONSUMABLES[entry.type].stack)
-      if (stack) {
-        stack.count++
-        return true
-      }
+      if (this.roomFor(this.bag, entry.type) < (entry.count ?? 1)) return false
+      this.stash(this.bag, entry.type, entry.count ?? 1)
+      return true
     }
     const free = this.bag.indexOf(null)
     if (free < 0) return false
@@ -455,6 +645,7 @@ export class Game {
       this.say(`Equipped ${item.name}`)
       return
     }
+    if (CONSUMABLES[entry.type].ammo) return this.say('Ammunition is used up as you shoot')
     if (entry.type === 'poultice') {
       if (this.health >= MAX_HEALTH) return this.say('You are already in good health')
       this.health++
@@ -469,14 +660,18 @@ export class Game {
     if (--entry.count <= 0) this.bag[i] = null
   }
 
-  // Right-click on a bag slot: sell one of it.
-  sellBagItem(i) {
-    const entry = this.bag[i]
+  // Right-click on a bag (or cart) slot: sell one of it.
+  sellBagItem(i, from = 'bag') {
+    const list = this.container(from)
+    const entry = list[i]
     if (!entry || this.state === 'over') return
+    if (from === 'cart' && !(this.cartOpen && this.nearCart())) return
     const value = this.valueOf(entry)
     this.gold += value
-    const name = entry.type === 'gear' ? entry.item.name : CONSUMABLES[entry.type].name
-    if (entry.type === 'gear' || --entry.count <= 0) this.bag[i] = null
+    const info = CONSUMABLES[entry.type]
+    const name = entry.type === 'gear' ? entry.item.name : info.ammo ? `${entry.count} ${info.name.toLowerCase()}` : info.name
+    // Ammunition goes as a whole stack; everything else one at a time
+    if (entry.type === 'gear' || info.ammo || --entry.count <= 0) list[i] = null
     this.say(`Sold ${name} for ${value} gold`)
   }
 
@@ -502,7 +697,7 @@ export class Game {
   updateHeldWeapon(dt) {
     const melee = this.equipment.melee
     const ranged = this.equipment.ranged
-    const loaded = this.ammo[this.ranged.ammo] > 0 && this.throwCooldown <= 0
+    const loaded = this.ammoCount(this.ranged.ammo) > 0 && this.throwCooldown <= 0
     const { weapon, bow } = this.cart.cart
     // Only the weapon in hand is drawn; the other is slung on your back.
     const inHand = this.active
@@ -530,44 +725,108 @@ export class Game {
     this.scatter('coin', enemy.gold, enemy.x, enemy.y)
   }
 
-  // Right-click (or F) swings the melee weapon toward the mouse, striking
-  // everything in a wide arc in front of you.
+  // Attacking with the melee weapon in hand. Each weapon fights its own way
+  // (its `style`): a single swing; a fast double cut; a long, narrow jab
+  // that can run through two foes; or a wound-up heavy blow. A click lines
+  // up one or more strikes, each landing when the animation does.
   updateMelee(dt, from) {
     this.meleeCooldown -= dt
     const weapon = this.melee
+    const holder = this.onFoot ? this.peasant.weapon : this.cart.cart.weapon
     if (this.active === 'melee' && this.input.pointer.down && this.meleeCooldown <= 0) {
       this.meleeCooldown = weapon.cooldown
       const aim = this.pointerWorld()
       const facing = Math.atan2(aim.y - from.y, aim.x - from.x)
-      const reach = weapon.reach + (this.onFoot ? PEASANT_RADIUS : CART_REACH)
-      for (const e of this.enemies.list) {
-        if (!e.alive || e.hidden) continue
-        const dx = e.x - from.x
-        const dy = e.y - from.y
-        const dist = Math.hypot(dx, dy)
-        let off = Math.atan2(dy, dx) - facing
-        off = Math.atan2(Math.sin(off), Math.cos(off))
-        if (dist > reach + e.radius || Math.abs(off) > 1.2) continue
-        e.hit(dx / (dist || 1), dy / (dist || 1), weapon.damage)
-        if (!e.alive) this.onKill(e)
+      const blow = { facing, reach: weapon.reach, arc: weapon.arc, damage: weapon.damage }
+      if (weapon.style === 'double') {
+        this.strikes.push({ at: 0, ...blow, fx: 'slash', anim: () => holder.play('slash') })
+        this.strikes.push({ at: weapon.gap, ...blow, fx: 'slash', back: true, anim: () => holder.play('slash', { back: true }) })
+      } else if (weapon.style === 'jab') {
+        holder.play('jab')
+        this.strikes.push({ at: 0.07, ...blow, fx: 'jab', pierce: weapon.pierce })
+      } else if (weapon.style === 'heavy') {
+        holder.play('heavy', { windup: weapon.windup })
+        this.strikes.push({ at: weapon.windup, ...blow, fx: 'heavy', force: weapon.force })
+      } else {
+        this.strikes.push({ at: 0, ...blow, fx: 'swing', anim: () => holder.play('swing') })
       }
-      const g = new Graphics()
-      g.arc(0, 0, reach, -1.1, 1.1).stroke({ width: 5, color: '#fff4d6', alpha: 0.8, cap: 'round' })
-      g.arc(0, 0, reach * 0.7, -0.8, 0.8).stroke({ width: 2, color: '#fff4d6', alpha: 0.4 })
-      g.position.set(from.x, from.y)
-      g.rotation = facing
-      this.air.addChild(g)
-      this.swings.push({ g, t: 0 })
-      ;(this.onFoot ? this.peasant.weapon : this.cart.cart.weapon).swing()
     }
+
+    for (const s of this.strikes) {
+      s.at -= dt
+      if (s.at <= 0) {
+        s.anim?.()
+        this.strike(this.player(), s)
+      }
+    }
+    this.strikes = this.strikes.filter((s) => s.at > 0)
+
     this.swings = this.swings.filter((s) => {
       s.t += dt
-      s.g.alpha = Math.max(0, 1 - s.t / 0.18)
-      s.g.scale.set(0.85 + s.t * 1.2)
-      if (s.t < 0.18) return true
+      s.g.alpha = Math.max(0, 1 - s.t / s.life)
+      s.g.scale.set(0.85 + (s.t / s.life) * 0.22)
+      if (s.t < s.life) return true
       s.g.destroy()
       return false
     })
+  }
+
+  // Land one blow: hit whatever is in its reach and arc (a jab: in a narrow
+  // line, the nearest `pierce` of them), and show it.
+  strike(from, s) {
+    const reach = s.reach + (this.onFoot ? PEASANT_RADIUS : CART_REACH)
+    const ax = Math.cos(s.facing)
+    const ay = Math.sin(s.facing)
+    const targets = []
+    for (const e of this.enemies.list) {
+      if (!e.alive || e.hidden) continue
+      const dx = e.x - from.x
+      const dy = e.y - from.y
+      const dist = Math.hypot(dx, dy)
+      if (dist > reach + e.radius) continue
+      if (s.fx === 'jab') {
+        // A line, not a wedge: ahead of you and close to the shaft
+        const along = dx * ax + dy * ay
+        const across = Math.abs(dx * -ay + dy * ax)
+        if (along < 0 || across > e.radius + 6) continue
+      } else {
+        let off = Math.atan2(dy, dx) - s.facing
+        off = Math.atan2(Math.sin(off), Math.cos(off))
+        if (Math.abs(off) > s.arc + 0.1) continue
+      }
+      targets.push({ e, dist, dx, dy })
+    }
+    targets.sort((a, b) => a.dist - b.dist)
+    const hit = s.pierce ? targets.slice(0, s.pierce) : targets
+    for (const { e, dist, dx, dy } of hit) {
+      e.hit(dx / (dist || 1), dy / (dist || 1), s.damage, s.force ?? 1)
+      if (!e.alive) this.onKill(e)
+    }
+    if (s.fx === 'heavy' && hit.length) this.shake = Math.max(this.shake, 0.15)
+
+    // The visible stroke of the blow
+    const g = new Graphics()
+    const paint = { color: '#fff4d6', cap: 'round' }
+    if (s.fx === 'jab') {
+      g.moveTo(reach * 0.35, 0).lineTo(reach, 0).stroke({ ...paint, width: 3, alpha: 0.85 })
+      g.poly([reach + 6, 0, reach - 3, -4, reach - 3, 4]).fill({ color: '#fff4d6', alpha: 0.9 })
+    } else if (s.fx === 'heavy') {
+      g.arc(0, 0, reach, -s.arc, s.arc).stroke({ ...paint, width: 9, alpha: 0.85 })
+      g.arc(0, 0, reach * 0.72, -s.arc * 0.85, s.arc * 0.85).stroke({ ...paint, width: 3, alpha: 0.45 })
+      for (let k = 0; k < 5; k++) {
+        const a = s.arc * (k / 2 - 1)
+        g.circle(Math.cos(a) * reach * 1.08, Math.sin(a) * reach * 1.08, 2.5).fill({ color: '#c9ad80', alpha: 0.7 })
+      }
+    } else {
+      // A cut: brighter at the end it finishes on
+      const [a0, a1] = s.back ? [s.arc, -s.arc] : [-s.arc, s.arc]
+      g.arc(0, 0, reach, Math.min(a0, a1), Math.max(a0, a1)).stroke({ ...paint, width: s.fx === 'slash' ? 3 : 5, alpha: 0.75 })
+      g.circle(Math.cos(a1) * reach, Math.sin(a1) * reach, 3).fill({ color: '#fff4d6', alpha: 0.9 })
+    }
+    g.position.set(from.x, from.y)
+    g.rotation = s.facing
+    this.air.addChild(g)
+    this.swings.push({ g, t: 0, life: s.fx === 'heavy' ? 0.28 : s.fx === 'jab' ? 0.14 : 0.16 })
   }
 
   // Shift gallops while the horse has wind; empty the bar and it's winded
@@ -601,36 +860,32 @@ export class Game {
   // Where the mouse is, in world coordinates.
   pointerWorld() {
     return {
-      x: this.input.pointer.x - this.world.x,
-      y: this.input.pointer.y - this.world.y,
+      x: (this.input.pointer.x - this.world.x) / WORLD_ZOOM,
+      y: (this.input.pointer.y - this.world.y) / WORLD_ZOOM,
     }
   }
 
   updateThrowing(dt, from) {
     this.throwCooldown -= dt
-    for (const [kind, { max, refill }] of Object.entries(AMMO)) {
-      if (this.ammo[kind] >= max) continue
-      this.refill[kind] += dt
-      if (this.refill[kind] >= refill) {
-        this.refill[kind] = 0
-        this.ammo[kind]++
-      }
-    }
-
     const weapon = this.ranged
     const target = this.pointerWorld()
-    const loaded = this.ammo[weapon.ammo] > 0
+    const loaded = this.ammoCount(weapon.ammo) > 0
     const inHand = this.active === 'ranged'
+    if (inHand && this.input.pointer.down && !loaded && this.time - this.outOfAmmoAt > 2) {
+      this.outOfAmmoAt = this.time
+      this.say(`Out of ${AMMO[weapon.ammo].name.toLowerCase()}${this.onFoot ? ' in your bag' : ''}!`)
+    }
     if (inHand && this.input.pointer.down && this.throwCooldown <= 0 && loaded) {
       this.stones.throw(from.x, from.y, target.x, target.y, from.vx, from.vy, weapon)
-      this.ammo[weapon.ammo]--
+      this.takeAmmo(weapon.ammo)
       ;(this.onFoot ? this.peasant.bow : this.cart.cart.bow).fire()
       this.throwCooldown = weapon.cooldown
     }
 
     // Dotted aim line out to the throwing range.
     const a = this.aim.clear()
-    if (!inHand) return
+    // Only while the mouse is over the game: otherwise there's nothing to aim at
+    if (!inHand || !this.input.pointer.inside) return
     const dx = target.x - from.x
     const dy = target.y - from.y
     const len = Math.hypot(dx, dy) || 1
@@ -684,39 +939,7 @@ export class Game {
   updateAttacks(dt) {
     this.invulnerable -= dt
     const { cart, peasant } = this
-    for (const e of this.enemies.list) {
-      if (!e.alive || e.attackCooldown > 0) continue
-      // On the cart they hack at the horse and cart; on foot, at you.
-      const inReach = this.onFoot
-        ? Math.hypot(e.x - peasant.x, e.y - peasant.y) < e.radius + PEASANT_RADIUS + 5
-        : Math.hypot(e.x - cart.cartX, e.y - cart.cartY) < e.radius + 26 ||
-          Math.hypot(e.x - cart.x, e.y - cart.y) < e.radius + 20
-      if (!inReach) continue
-
-      e.attackCooldown = 1.2
-      if (this.invulnerable > 0) continue
-      // Armour only protects the peasant, not the cart.
-      if (this.onFoot && Math.random() < blockChance(this.equipment)) {
-        this.blockFlash = 0.25
-        continue
-      }
-      this.invulnerable = INVULNERABLE
-      this.shake = 0.3
-      const goblins = e.faction === 'goblin'
-      if (this.onFoot) {
-        this.health = Math.max(0, this.health - e.damage)
-        if (this.health <= 0) {
-          goblins
-            ? this.end('Overrun by goblins', 'the goblins caught you on foot')
-            : this.end('Robbed by bandits', 'the bandits cut you down by the road')
-        }
-      } else if ((this.cartHealth = Math.max(0, this.cartHealth - e.damage)) <= 0) {
-        goblins
-          ? this.end('Cart torn apart', 'the goblins hacked your cart to kindling')
-          : this.end('Cart smashed', 'the bandits smashed your cart and took the horse')
-      }
-    }
-
+    // (Blows themselves land in Enemies.update, only when a weapon connects.)
     const hurt = this.invulnerable > INVULNERABLE - 0.2
     const blink = this.invulnerable > 0 && Math.floor(this.invulnerable * 12) % 2 ? 0.6 : 1
     const victims = this.onFoot ? [peasant.view] : [cart.horse, cart.cart]
@@ -730,6 +953,34 @@ export class Game {
     if (this.blockFlash > 0) peasant.view.tint = 0x9cc8ff
   }
 
+  // A blow or an arrow lands: on foot it's you, on the cart it's the cart.
+  hurt(damage, faction, arrow) {
+    if (this.invulnerable > 0 || this.state === 'over') return
+    // Armour only protects the peasant, not the cart.
+    if (this.onFoot && Math.random() < blockChance(this.equipment)) {
+      this.blockFlash = 0.25
+      return
+    }
+    this.invulnerable = INVULNERABLE
+    this.shake = 0.3
+    const goblins = faction === 'goblin'
+    if (this.onFoot) {
+      this.health = Math.max(0, this.health - damage)
+      if (this.health > 0) return
+      if (arrow) {
+        this.end('Shot down', goblins ? 'a goblin arrow found its mark' : 'a bandit archer shot you down')
+      } else {
+        goblins
+          ? this.end('Overrun by goblins', 'the goblins caught you on foot')
+          : this.end('Robbed by bandits', 'the bandits cut you down by the road')
+      }
+    } else if ((this.cartHealth = Math.max(0, this.cartHealth - damage)) <= 0) {
+      goblins
+        ? this.end('Cart torn apart', 'the goblins hacked your cart to kindling')
+        : this.end('Cart smashed', 'the bandits smashed your cart and took the horse')
+    }
+  }
+
   end(title, text) {
     if (this.state === 'over') return
     this.state = 'over'
@@ -741,8 +992,13 @@ export class Game {
 
   updateCamera(dt) {
     const { cart, input } = this
+    const zoom = WORLD_ZOOM
     const halfW = this.app.screen.width / 2
     const halfH = this.app.screen.height / 2
+    // Half the view, and the edge margin, in world units
+    const viewW = halfW / zoom
+    const viewH = halfH / zoom
+    const margin = CAMERA_MARGIN / zoom
     const clamp = (v, min, max) => Math.max(min, Math.min(max, v))
 
     // Follow the peasant on foot; on the cart, look ahead along the road.
@@ -761,16 +1017,16 @@ export class Game {
     // Pan toward the mouse: at the edge of the screen the view shifts as far
     // as it can while still keeping the player in shot.
     if (input.pointer.active) {
-      tx += clamp((input.pointer.x - halfW) / halfW, -1, 1) * (halfW - CAMERA_MARGIN)
-      ty += clamp((input.pointer.y - halfH) / halfH, -1, 1) * (halfH - CAMERA_MARGIN)
+      tx += clamp((input.pointer.x - halfW) / halfW, -1, 1) * (viewW - margin)
+      ty += clamp((input.pointer.y - halfH) / halfH, -1, 1) * (viewH - margin)
     }
 
     const k = 1 - Math.exp(-dt * 4)
     this.camX += (tx - this.camX) * k
     this.camY += (ty - this.camY) * k
 
-    const reachX = Math.max(0, halfW - CAMERA_MARGIN)
-    const reachY = Math.max(0, halfH - CAMERA_MARGIN)
+    const reachX = Math.max(0, viewW - margin)
+    const reachY = Math.max(0, viewH - margin)
     const xs = keep.map((p) => p.x)
     const ys = keep.map((p) => p.y)
     this.camX = clamp(this.camX, Math.max(...xs) - reachX, Math.min(...xs) + reachX)
@@ -778,10 +1034,19 @@ export class Game {
 
     this.shake = Math.max(0, this.shake - dt)
     const jolt = this.shake * 20
+    // Snap to whole art pixels so the picture doesn't shimmer as it scrolls.
+    const px = this.app.pixelSize ?? 1
+    this.world.scale.set(zoom)
     this.world.position.set(
-      Math.round(halfW - this.camX + (Math.random() - 0.5) * jolt),
-      Math.round(halfH - this.camY + (Math.random() - 0.5) * jolt),
+      Math.round((halfW - this.camX * zoom + (Math.random() - 0.5) * jolt) / px) * px,
+      Math.round((halfH - this.camY * zoom + (Math.random() - 0.5) * jolt) / px) * px,
     )
+    this.backdrop.width = this.app.screen.width
+    this.backdrop.height = this.app.screen.height
+    if (this.backdrop.tilePosition) {
+      this.backdrop.tilePosition.set(this.world.x, this.world.y)
+      this.backdrop.tileScale.set(zoom)
+    }
   }
 
   destroy() {

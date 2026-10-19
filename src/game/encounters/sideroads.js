@@ -1,6 +1,7 @@
 import { Container, Graphics, Text } from 'pixi.js'
 import { ROAD_WIDTH, SEGMENT } from '../road.js'
 import { stageAt } from '../threat.js'
+import { dirtPattern } from '../textures.js'
 import { rand, randInt, roadFrame } from './helpers.js'
 import { DEST_RADIUS, friendlyVillage, raidedVillage, banditStronghold, goblinWarcamp } from './destinations.js'
 
@@ -72,11 +73,17 @@ function drawRoute(road, points, colours) {
     })
     return g
   }
-  const style = (width, color, alpha = 1) => ({ width, color, alpha, cap: 'round', join: 'round' })
-  const edge = path(new Graphics()).stroke(style(SIDE_WIDTH + 14, colours.edge))
-  const fill = path(new Graphics()).stroke(style(SIDE_WIDTH, colours.fill))
-  path(fill, -14).stroke(style(5, colours.rut, 0.6))
-  path(fill, 14).stroke(style(5, colours.rut, 0.6))
+  // Same textured earth as the main road, just narrower and less worn
+  const style = (width, color, alpha = 1, textured = false) => {
+    const fill = textured ? dirtPattern(color) : null
+    return { width, color: fill ? 0xffffff : color, alpha, cap: 'round', join: 'round', fill }
+  }
+  const edge = path(new Graphics()).stroke(style(SIDE_WIDTH + 28, colours.edge, 0.3))
+  path(edge).stroke(style(SIDE_WIDTH + 10, colours.edge, 0.9, true))
+  const fill = path(new Graphics()).stroke(style(SIDE_WIDTH, colours.fill, 1, true))
+  path(fill).stroke(style(18, colours.crown, 0.35, true))
+  path(fill, -14).stroke(style(8, colours.rut, 0.65, true))
+  path(fill, 14).stroke(style(8, colours.rut, 0.65, true))
   // Same layers as the main road, so the two blend at the junction
   road.edgeLayer.addChild(edge)
   road.fillLayer.addChild(fill)
@@ -92,14 +99,14 @@ function signpost(view, x, y, pointsLeft, title, metres, hostile) {
   g.circle(0, 0, 3.5).fill('#5e3f22')
   const label = new Text({
     text: `${title} · ${metres} m`,
-    style: { fontFamily: 'Georgia, serif', fontWeight: 'bold', fontSize: 11, fill: hostile ? '#f3e3c0' : '#2a1f14' },
+    style: { fontFamily: '"Pixelify Sans", monospace', fontWeight: '600', fontSize: 18, fill: hostile ? '#f3e3c0' : '#2a1f14' },
   })
   label.anchor.set(0.5)
-  label.y = -16
+  label.y = -20
   // Board drawn pointing right; mirrored to point left.
   const board = new Graphics()
-  board.poly([-84, -26, 84, -26, 98, -16, 84, -6, -84, -6]).fill(hostile ? '#7a4a3a' : '#a8875c').stroke({ width: 2, color: '#4a3220' })
-  if (hostile) board.circle(84, -16, 3.5).fill('#e8e0c8')
+  board.poly([-125, -36, 125, -36, 145, -20, 125, -4, -125, -4]).fill(hostile ? '#7a4a3a' : '#a8875c').stroke({ width: 3, color: '#3d2f25' })
+  if (hostile) board.circle(125, -20, 5).fill('#e8e0c8')
   if (pointsLeft) board.scale.x = -1
   post.addChild(g, board, label)
   post.position.set(x, y)

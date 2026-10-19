@@ -28,6 +28,21 @@ const ICONS = {
   sword: [{ d: 'M28 5 L33 7 L31 12 L16 27 L12 23 Z' }, { d: 'M8 20 L19 31', line: true, wide: true, trim: true }, { d: 'M13 27 L7 33', line: true, wide: true }],
   spear: [{ d: 'M6 35 L28 10', line: true, wide: true }, { d: 'M25 9 L36 3 L31 15 Z', trim: true }],
   axe: [{ d: 'M10 35 L26 7', line: true, wide: true }, { d: 'M21 5 Q36 4 33 20 L25 14 Z', trim: true }],
+  // Ammunition stacks
+  stones: [
+    { d: 'M7 26 Q7 20 13 20 Q19 20 19 26 Q19 31 13 31 Q7 31 7 26 Z', color: '#8d8a80' },
+    { d: 'M20 24 Q20 17 27 17 Q34 17 33 24 Q33 30 27 30 Q20 30 20 24 Z', color: '#a8a59a' },
+    { d: 'M13 15 Q13 9 19 9 Q25 9 25 15 Q25 20 19 20 Q13 20 13 15 Z', color: '#7c766c' },
+  ],
+  arrows: [
+    { d: 'M8 33 L31 8 M13 34 L34 12 M6 28 L28 6', line: true, color: '#8b6236' },
+    { d: 'M31 8 L33 4 L35 9 Z M34 12 L37 9 L37 14 Z M28 6 L29 2 L32 6 Z', color: '#d8dde2' },
+    { d: 'M8 33 L5 31 M8 33 L7 36 M13 34 L10 32 M13 34 L12 37 M6 28 L3 26 M6 28 L5 31', line: true, color: '#e8e0c8' },
+  ],
+  bolts: [
+    { d: 'M10 30 L28 12 M16 32 L33 15', line: true, wide: true, color: '#5e3f22' },
+    { d: 'M28 12 L32 9 L31 14 Z M33 15 L37 12 L36 17 Z', color: '#a6b0bb' },
+  ],
   poultice: [
     { d: 'M9 20 Q9 11 20 11 Q31 11 31 20 Q31 33 20 33 Q9 33 9 20 Z', color: '#c9b98c' },
     { d: 'M15 11 Q20 4 25 11', line: true, color: '#7a5a34' },

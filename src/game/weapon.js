@@ -1,6 +1,9 @@
 import { Container, Graphics } from 'pixi.js'
 
 const SWING_TIME = 0.18
+const SLASH_TIME = 0.11
+const JAB_TIME = 0.2
+const HEAVY_TIME = 0.16
 const IDLE_ANGLE = 0.9 // held out to the right side, pointing forward
 const HAND = 7 // distance from the body's centre to the hand
 
@@ -43,7 +46,8 @@ export class WeaponHolder {
     this.pivot.addChild(this.g)
     parent.addChild(this.pivot)
     this.icon = undefined
-    this.swingT = SWING_TIME
+    this.move = null
+    this.t = 0
   }
 
   set(item) {
@@ -54,17 +58,43 @@ export class WeaponHolder {
     if (icon) drawWeapon(this.g, icon)
   }
 
-  swing() {
-    this.swingT = 0
+  // Play an attack: 'swing' (one sweep), 'slash' (a quick cut; `back` cuts
+  // the other way), 'jab' (a thrust straight out) or 'heavy' (a wind-up, then
+  // a big sweep landing after `windup` seconds).
+  play(move, { back = false, windup = 0 } = {}) {
+    this.move = { name: move, back, windup }
+    this.t = 0
   }
 
   // `facing` is the aim direction relative to the parent's own rotation.
   update(dt, facing = 0) {
-    this.swingT += dt
-    const t = this.swingT / SWING_TIME
-    // Sweep from the left of the aim line across to the right, then rest.
-    const angle = t < 1 ? -1.1 + 2.2 * (1 - (1 - t) * (1 - t)) : IDLE_ANGLE
+    this.t += dt
+    const m = this.move
+    const easeOut = (p) => 1 - (1 - p) * (1 - p)
+    let angle = IDLE_ANGLE
+    let reach = HAND
+    if (m?.name === 'swing' || m?.name === 'slash') {
+      const p = this.t / (m.name === 'slash' ? SLASH_TIME : SWING_TIME)
+      const from = m.back ? 1.1 : -1.1
+      if (p < 1) angle = from - 2 * from * easeOut(p)
+    } else if (m?.name === 'jab') {
+      // Straight at the target, punched out and drawn back
+      const p = this.t / JAB_TIME
+      if (p < 1) {
+        angle = 0
+        reach = HAND + Math.sin(p * Math.PI) * 18
+      }
+    } else if (m?.name === 'heavy') {
+      // Raised back over the shoulder, then brought round hard
+      if (this.t < m.windup) {
+        angle = IDLE_ANGLE + (-1.9 - IDLE_ANGLE) * easeOut(this.t / m.windup)
+      } else {
+        const p = (this.t - m.windup) / HEAVY_TIME
+        if (p < 1) angle = -1.9 + 3.5 * p * p
+      }
+    }
     this.pivot.rotation = facing + angle
+    this.g.x = reach
   }
 }
 

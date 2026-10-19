@@ -16,7 +16,7 @@ const VILLAGES = ['Millbrook', 'Ashford', 'Hollowmere', 'Thornby', 'Wexley', 'Ba
 const STRONGHOLDS = ['Redhand Stronghold', 'The Crow’s Nest', 'Blackfen Hold', 'Gallows Keep', 'Cutthroat Hold']
 const WARCAMPS = ['Gorefang Warcamp', 'Skullpile Warcamp', 'Grimtusk Camp', 'The Bonepit', 'Rotjaw Warcamp']
 
-const SIGN_TEXT = { fontFamily: 'Georgia, serif', fontWeight: 'bold', fontSize: 13, fill: '#2a1f14' }
+const SIGN_TEXT = { fontFamily: '"Pixelify Sans", monospace', fontWeight: '600', fontSize: 20, fill: '#1c1714' }
 
 // --- Shared pieces -------------------------------------------------------
 
@@ -65,10 +65,10 @@ function addSign(view, x, y, text, hostile) {
   const sign = new Container()
   const g = new Graphics()
   g.moveTo(0, 6).lineTo(0, -14).stroke({ width: 3, color: '#5e3f22' })
-  g.roundRect(-72, -34, 144, 22, 3).fill(hostile ? '#7a4a3a' : '#a8875c').stroke({ width: 2, color: '#4a3220' })
+  g.roundRect(-100, -46, 200, 32, 3).fill(hostile ? '#7a4a3a' : '#a8875c').stroke({ width: 3, color: '#3d2f25' })
   const label = new Text({ text, style: { ...SIGN_TEXT, fill: hostile ? '#f3e3c0' : '#2a1f14' } })
   label.anchor.set(0.5)
-  label.y = -23
+  label.y = -30
   sign.addChild(g, label)
   sign.position.set(x, y)
   view.addChild(sign)
@@ -159,7 +159,9 @@ function stockFor(metres) {
   const store = [
     { kind: 'consumable', type: 'poultice', price: 6 },
     { kind: 'consumable', type: 'planks', price: 6 },
-    { kind: 'service', type: 'ammo', name: 'Restock stones, arrows and bolts', price: 5 },
+    { kind: 'consumable', type: 'arrows', qty: 15, price: 9 },
+    { kind: 'consumable', type: 'bolts', qty: 10, price: 10 },
+    { kind: 'consumable', type: 'stones', qty: 30, price: 3 },
     { kind: 'service', type: 'repair', name: 'Mend the cart fully', price: 2, per: 'cart point' },
     { kind: 'service', type: 'heal', name: 'See the healer', price: 4, per: 'heart' },
   ]
@@ -332,7 +334,7 @@ export function banditStronghold({ view, cx, cy, entrance, enemies, extra, km })
   addProp(view, 'barrel', cx + Math.cos(back + 0.2) * 128, cy + Math.sin(back + 0.2) * 128)
 
   const members = []
-  for (const t of towers) members.push(enemies.add('bandit', t.x, t.y, { x: t.x, y: t.y, facing: entrance }))
+  for (const t of towers) members.push(enemies.add('archer', t.x, t.y, { x: t.x, y: t.y, facing: entrance }))
   const yard = { x: cx, y: cy, min: 30, max: 120 }
   for (let k = 0; k < Math.min(16, 6 + extra * 2 + Math.floor(km)); k++) {
     const a = rand(0, Math.PI * 2)

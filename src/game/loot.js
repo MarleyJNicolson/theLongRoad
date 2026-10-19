@@ -5,12 +5,15 @@ export const CHEST_CHANCE = 0.5
 
 const randInt = (min, max) => Math.floor(min + Math.random() * (max - min + 1))
 
-// Always some gold; sometimes a healing poultice or tools to mend the cart.
+// Always some gold; sometimes a healing poultice, tools to mend the cart,
+// or a bundle of arrows or bolts.
 function rollChest() {
   return {
     gold: randInt(3, 7),
     health: Math.random() < 0.35 ? 1 : 0,
     repair: Math.random() < 0.35 ? 2 : 0,
+    arrows: Math.random() < 0.4 ? randInt(8, 16) : 0,
+    bolts: Math.random() < 0.15 ? randInt(4, 8) : 0,
   }
 }
 
@@ -90,4 +93,43 @@ export function maybeAddChest(list, view, x, y, chance = CHEST_CHANCE) {
   }
   list.push(chest)
   return chest
+}
+
+// A barrel of arrows kept by a camp's archers (and the odd bundle of bolts).
+// Whatever doesn't fit in your bag stays in it for later.
+export function addArrowBarrel(list, view, x, y) {
+  const g = new Graphics()
+  g.position.set(x, y)
+  view.addChild(g)
+  const barrel = {
+    kind: 'arrows',
+    x,
+    y,
+    opened: false,
+    contents: { arrows: randInt(12, 24), bolts: Math.random() < 0.3 ? randInt(5, 10) : 0 },
+    // Redraw to match what's left; empty means opened.
+    update() {
+      const { arrows, bolts } = barrel.contents
+      barrel.opened = !arrows && !bolts
+      g.clear()
+      g.circle(2, 2, 10).fill({ color: '#000', alpha: 0.2 })
+      g.circle(0, 0, 10).fill('#6e4a28')
+      g.circle(0, 0, 7).stroke({ width: 2, color: '#3a2a1a' })
+      g.circle(0, 0, 6).fill('#2a1f14')
+      // Fletchings poking out of the top
+      const shafts = Math.min(7, Math.ceil(arrows / 3))
+      for (let k = 0; k < shafts; k++) {
+        const a = (k / Math.max(1, shafts)) * Math.PI * 2
+        const fx = Math.cos(a) * 3.5
+        const fy = Math.sin(a) * 3.5
+        g.moveTo(fx, fy).lineTo(fx * 1.6, fy * 1.6 - 3).stroke({ width: 1.5, color: '#8b6236' })
+        g.circle(fx * 1.6, fy * 1.6 - 3, 1.6).fill(k % 2 ? '#e8e0c8' : '#a3331f')
+      }
+      if (bolts) g.rect(-2, -2, 4, 4).fill('#5e3f22')
+    },
+    animate() {},
+  }
+  barrel.update()
+  list.push(barrel)
+  return barrel
 }

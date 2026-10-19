@@ -1,11 +1,16 @@
-import { Container, Graphics } from 'pixi.js'
-import { RangedHolder, WeaponHolder } from './weapon.js'
+import { Container } from 'pixi.js'
+import { Rig } from './rig.js'
 
 const WALK_SPEED = 120
 export const PEASANT_RADIUS = 8
 
+// Equipped items drawn in the peasant's hands (rig.js weapon names).
+const MELEE = { club: 'club', sword: 'sword', spear: 'spear', axe: 'axe' }
+const RANGED = { bow: 'bow', crossbow: 'crossbow', sling: 'sling' }
+
 // The peasant on foot: walks with WASD, faces the mouse, and bumps into
-// trees, buildings and the horse and cart.
+// trees, buildings and the horse and cart. Drawn as a jointed figure in a
+// straw hat (see rig.js).
 export class Peasant {
   constructor(layer) {
     this.x = 0
@@ -13,28 +18,27 @@ export class Peasant {
     this.vx = 0
     this.vy = 0
     this.facing = 0
-    this.step = 0
 
+    this.rig = new Rig({ skin: '#d9b08c', shirt: '#6b5b3e', legs: '#4a3a2b', head: 'straw' })
     this.view = new Container()
-    this.arms = [-1, 1].map((side) => {
-      const arm = new Graphics().circle(0, 0, 3).fill('#6b5b3e')
-      arm.position.set(1, side * 8)
-      arm.baseX = 1
-      return arm
-    })
-    const body = new Graphics()
-    body.ellipse(2, 2, 9, 11).fill({ color: '#000', alpha: 0.2 })
-    body.ellipse(-1, 0, 6.5, 9).fill('#6b5b3e')
-    body.circle(0, 0, 7.5).fill('#d4b25e')
-    body.circle(0, 0, 4).fill('#c29d48')
-    body.moveTo(-6, 0).lineTo(6, 0).stroke({ width: 1, color: '#a8853a', alpha: 0.6 })
-    this.view.addChild(...this.arms, body)
-    // Weapon sits under the body so the grip disappears into the hand.
-    this.weapon = new WeaponHolder(this.view)
-    this.view.setChildIndex(this.weapon.pivot, 0)
-    this.bow = new RangedHolder(this.view)
+    this.view.addChild(this.rig.view)
     this.view.visible = false
     layer.addChild(this.view)
+
+    // What Game uses to put weapons in hand and play attacks
+    const rig = this.rig
+    this.weapon = {
+      set: (item) => (rig.weapon = MELEE[item?.icon] ?? null),
+      play: (move, opts) => rig.play(move, opts),
+    }
+    this.bow = {
+      set: (item, loaded) => {
+        rig.offhand = RANGED[item?.icon] ?? null
+        rig.loaded = loaded
+        rig.aiming = !!rig.offhand
+      },
+      fire: () => rig.loose(),
+    }
   }
 
   get active() {
@@ -46,7 +50,7 @@ export class Peasant {
     this.y = y
     this.vx = this.vy = 0
     this.view.visible = true
-    this.render()
+    this.render(0)
   }
 
   hide() {
@@ -75,18 +79,12 @@ export class Peasant {
     }
 
     this.facing = Math.atan2(aimY - this.y, aimX - this.x)
-    this.step += Math.hypot(this.vx, this.vy) * dt * 0.2
-    this.weapon.update(dt)
-    this.bow.update(dt)
-    this.render()
+    this.render(dt)
   }
 
-  render() {
+  render(dt) {
+    this.rig.update(dt, this.facing, Math.hypot(this.vx, this.vy))
     this.view.position.set(this.x, this.y)
-    this.view.rotation = this.facing
-    const swing = Math.min(3, Math.hypot(this.vx, this.vy) / 25)
-    this.arms.forEach((arm, i) => {
-      arm.x = arm.baseX + Math.sin(this.step + i * Math.PI) * swing
-    })
+    this.view.zIndex = this.y // sorted with the raiders by depth
   }
 }

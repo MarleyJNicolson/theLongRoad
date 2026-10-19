@@ -9,10 +9,10 @@ defineProps({
 const emit = defineEmits(['buy', 'close'])
 
 // Services have no item of their own; borrow a fitting icon.
-const SERVICE_ICON = { repair: 'planks', heal: 'poultice', ammo: 'stone' }
+const SERVICE_ICON = { repair: 'planks', heal: 'poultice' }
 const iconFor = (offer) => offer.item ?? { icon: SERVICE_ICON[offer.type], tier: 1 }
 const detail = (offer) => {
-  if (offer.kind === 'service') return offer.type === 'ammo' ? 'Fills every quiver and pouch' : 'Price depends on the damage'
+  if (offer.kind === 'service') return 'Price depends on the damage'
   const lines = describe(offer.item)
   return offer.kind === 'gear' ? [TIER_COLOURS[offer.item.tier].name, ...lines].join(' · ') : lines.join(' · ')
 }
@@ -52,11 +52,11 @@ const detail = (offer) => {
   transform: translateY(-50%);
   width: 340px;
   max-width: calc(100vw - 32px);
-  background: rgba(40, 26, 12, 0.92);
+  background: var(--panel);
   border: 1px solid rgba(212, 163, 42, 0.6);
-  border-radius: 8px;
+  border-radius: 0;
   padding: 12px;
-  font-family: Georgia, serif;
+  font-family: var(--font-ui);
   color: #f3e3c0;
   user-select: none;
 }
@@ -116,7 +116,7 @@ li {
   align-items: center;
   gap: 10px;
   padding: 6px;
-  border-radius: 6px;
+  border-radius: 0;
   background: rgba(0, 0, 0, 0.25);
 }
 
@@ -128,7 +128,7 @@ li.sold {
   width: 40px;
   height: 40px;
   border: 2px solid rgba(243, 227, 192, 0.2);
-  border-radius: 6px;
+  border-radius: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -157,7 +157,7 @@ li.sold {
 .buy {
   min-width: 58px;
   padding: 6px 10px;
-  border-radius: 5px;
+  border-radius: 0;
   border: 1px solid #d4a32a;
   background: rgba(212, 163, 42, 0.2);
   color: #ffe9a8;
