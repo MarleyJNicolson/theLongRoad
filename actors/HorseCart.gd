@@ -93,6 +93,7 @@ var horse: Painter
 var driver: Node2D # the seat the driver's rig sits on
 var rig: Rig
 var aim := 0.0 # where the driver is looking, relative to the cart
+var lantern: PointLight2D
 
 
 func _init(layer: Node2D, x_: float, y_: float, heading_: float) -> void:
@@ -116,6 +117,9 @@ func _init(layer: Node2D, x_: float, y_: float, heading_: float) -> void:
 	cart.add_child(cart_back)
 	cart.add_child(driver)
 	cart.add_child(cart_front)
+	# A lantern on the cart, to see the road by at night
+	lantern = Glow.light(190, Color("#ffd99a"), 1.0)
+	cart.add_child(lantern)
 	horse = Painter.new(_draw_horse)
 	layer.add_child(shafts)
 	layer.add_child(cart)
@@ -249,6 +253,7 @@ func render(dt := 0.0) -> void:
 	cart_back.queue_redraw()
 	cart_front.queue_redraw()
 	driver.position = View.new(cart_heading).xy(12, 0)
+	lantern.position = View.new(cart_heading).xy(18, 0, 26)
 	rig.update(dt, cart_heading + aim, 0)
 	# Nearer the bottom of the screen draws in front
 	shafts.position = Vector2((x + cart_x) / 2, (y + cart_y) / 2)

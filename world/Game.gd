@@ -66,7 +66,13 @@ var road: Road
 var scenery: Scenery
 var encounters: Encounters
 var trading: Variant = null # the trader whose wares are on show
-var town: Variant = null # the town you're in, if any: { name, safe }
+var town: Variant = null # the town you're in, if any: { name, safe, inn }
+var clock := 0.0 # seconds since the first morning (see DayNight)
+var was_night := false
+var sky: CanvasModulate # tints the whole world for the time of day
+var war_bands: WarBands
+var rest_fade := 0.0 # the screen fading back in after a night at the inn
+var start_clock := 0.0 # debug: `--clock=N` starts N seconds into the day
 var cart: HorseCart
 var peasant: Peasant
 var marker: Painter
@@ -130,6 +136,8 @@ func _ready() -> void:
 	backdrop.region_enabled = true
 	backdrop.centered = false
 	add_child(backdrop)
+	sky = CanvasModulate.new()
+	add_child(sky)
 	reset()
 
 
@@ -165,6 +173,10 @@ func reset() -> void:
 	scenery.update(0)
 	trading = null
 	town = null
+	war_bands = WarBands.new(enemies, road)
+	clock = start_clock
+	was_night = DayNight.is_night(clock)
+	rest_fade = 0.0
 	missiles = Missiles.new(air)
 	enemy_arrows = EnemyArrows.new(air)
 	aim_line = Painter.new(_draw_aim)
@@ -265,6 +277,7 @@ func _process(delta: float) -> void:
 			reset()
 		return
 	time += dt
+	_update_sky(dt)
 	if debug_autoaim:
 		_debug_aim()
 	if debug_goto and time > 0.3:
@@ -341,6 +354,8 @@ func _process(delta: float) -> void:
 	if here and here != town:
 		_arrive(here)
 	town = here
+	war_bands.update(dt, DayNight.is_night(clock), Vector2(from.x, from.y), road_index, metres,
+		encounters.towns().map(func(t: Dictionary) -> Vector3: return t.safe))
 	# On foot, the cart is just in the way and raiders go round it.
 	var bodies := []
 	for b in cart.bodies():
@@ -510,6 +525,47 @@ func _arrive(place: Dictionary) -> void:
 		say("The folk of %s mend your cart and bind your wounds" % place.name, 1.5)
 	else:
 		say("You rest awhile in %s" % place.name, 1.5)
+
+
+# --- Day and night -------------------------------------------------------------
+
+# Which day it is (from 1).
+func day() -> int:
+	return floori(clock / DayNight.CYCLE) + 1
+
+
+# Time passes: the world darkens toward night and lights come up; nightfall
+# and dawn are announced.
+func _update_sky(dt: float) -> void:
+	clock += dt
+	rest_fade = maxf(0.0, rest_fade - dt / 1.5)
+	var dark := DayNight.darkness(clock)
+	sky.color = DayNight.tint(clock)
+	Glow.shine(get_tree(), dark)
+	var night := DayNight.is_night(clock)
+	if night and not was_night:
+		banner = {"title": "Nightfall", "sub": "War bands roam the dark · make for a town", "t": STAGE_BANNER_TIME}
+	elif was_night and not night:
+		banner = {"title": "Dawn", "sub": "Day %d" % day(), "t": STAGE_BANNER_TIME}
+	was_night = night
+
+
+# E at the inn, by night: sleep until morning, waking healed with the cart
+# mended, and the war bands gone.
+func rest_until_dawn() -> void:
+	if not town:
+		return
+	clock = (floorf(clock / DayNight.CYCLE) + 1) * DayNight.CYCLE
+	was_night = false
+	rest_fade = 1.0
+	war_bands.clear()
+	health = MAX_HEALTH
+	cart_health = MAX_CART_HEALTH
+	stamina = 1.0
+	winded = false
+	breath = 1.0
+	out_of_breath = false
+	banner = {"title": "Day %d" % day(), "sub": "You wake rested at the inn of %s" % town.name, "t": STAGE_BANNER_TIME}
 
 
 # --- Bag and cart storage ----------------------------------------------------
@@ -1152,6 +1208,8 @@ func _interaction() -> Variant:
 	var rock: Variant = scenery.gatherable_near(p.x, p.y, LOOT_REACH)
 	if rock:
 		return {"label": "E – Gather stones", "x": rock.x, "y": rock.y, "act": func() -> void: gather(rock)}
+	if town and DayNight.is_night(clock) and p.distance_to(town.inn) < 44:
+		return {"label": "E – Sleep at the inn until dawn", "x": town.inn.x, "y": town.inn.y, "act": rest_until_dawn}
 	if Vector2(cart.cart_x, cart.cart_y).distance_to(p) < MOUNT_REACH:
 		return {"label": "E – Climb back on the cart", "x": cart.cart_x, "y": cart.cart_y, "act": mount}
 	return null
@@ -1341,6 +1399,8 @@ func _read_debug_args() -> void:
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--zoom="):
 			debug_zoom = float(arg.trim_prefix("--zoom="))
+		elif arg.begins_with("--clock="):
+			start_clock = float(arg.trim_prefix("--clock="))
 		elif arg.begins_with("--metres="):
 			Road.start_along = float(arg.trim_prefix("--metres=")) * PX_PER_METRE
 		elif arg.begins_with("--visit="):

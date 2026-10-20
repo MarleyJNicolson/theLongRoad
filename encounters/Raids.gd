@@ -154,6 +154,7 @@ static func goblin_raid(b: Build) -> Variant:
 		var top := at.y - roof + randf_range(2, 10)
 		var flame := b.stand(Structures.flames(), at.x, top, h.y + 30)
 		flame.scale = Vector2.ONE * 1.3
+		flame.add_child(Glow.light(90, Color("#ff8a2c"), 1.0))
 		fires.append({"g": flame, "at": Vector2(at.x, top), "seed": randf_range(0, 10)})
 	var glow := Sketch.new().circle(Vector2.ZERO, 110, Color("#ff8a2c", 0.14))
 	glow.position = h

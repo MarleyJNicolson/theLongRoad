@@ -101,7 +101,7 @@ static func build(b: Build) -> Dictionary:
 
 	# Cottages along both sides of the road, doors towards it; the square
 	# side has fewer, round the market
-	var homes := [Vector2(-185, 135), Vector2(-60, 195), Vector2(75, 195), Vector2(190, 125),
+	var homes := [Vector2(-185, 135), Vector2(75, 195), Vector2(190, 125),
 		Vector2(-200, -120), Vector2(200, -120)]
 	for h in homes:
 		var at: Vector2 = side_of.call(h.x, h.y)
@@ -110,6 +110,33 @@ static func build(b: Build) -> Dictionary:
 		for fy in [-24.0, 0.0, 24.0]:
 			var s: Vector2 = at + Vector2(0, fy).rotated(facing)
 			solids.append(Vector3(s.x, s.y, 31))
+
+	# The inn, bigger than the cottages, its sign and lantern by the door. At
+	# night you can sleep there until dawn.
+	var inn_at: Vector2 = side_of.call(-55, 200)
+	var inn_facing := (-f.n).angle()
+	var inn := Structures.cottage(inn_facing, false, 62.0, 108.0, 32.0)
+	b.stand(inn.g, inn_at.x, inn_at.y, null, {"r": 52, "height": inn.roof + 6})
+	for fy in [-36.0, -12.0, 12.0, 36.0]:
+		var s: Vector2 = inn_at + Vector2(0, fy).rotated(inn_facing)
+		solids.append(Vector3(s.x, s.y, 33))
+	var door := inn_at + Vector2(31 + 22, 0).rotated(inn_facing)
+	var sign_at := inn_at + Vector2(31 + 18, 34).rotated(inn_facing)
+	var sign := Glow.lantern_post(30)
+	var board := Sketch.new()
+	var plate := Sketch.round_rect_points(-20, -52, 40, 18, 2)
+	board.poly(plate, Color("#a8875c")).poly_stroke(plate, 2, Color("#3d2f25"))
+	sign.add_child(board)
+	sign.add_child(Fonts.world_label("Inn", Vector2(0, -43), 14, Color("#2a1f14")))
+	b.stand(sign, sign_at.x, sign_at.y)
+
+	# Lanterns by both gates, and on the square
+	for g in gates:
+		for s in [-1.0, 1.0]:
+			var at: Vector2 = c + Vector2(cos(g), sin(g)) * (RADIUS - 30) + f.n * s * (Road.ROAD_WIDTH / 2 + 18)
+			b.stand(Glow.lantern_post(), at.x, at.y)
+	var lamp: Vector2 = side_of.call(0, -95)
+	b.stand(Glow.lantern_post(), lamp.x, lamp.y)
 
 	# The market: a well, two stalls and their keepers (more stock than a village)
 	b.stand(Structures.well(), square.x, square.y, null, {"r": 14, "height": 44})
@@ -156,5 +183,5 @@ static func build(b: Build) -> Dictionary:
 		"zones": [Vector3(c.x, c.y, RADIUS + 20)],
 		"trigger": Vector3(c.x, c.y, 0),
 		"animate": animate,
-		"town": {"name": town, "safe": Vector3(c.x, c.y, RADIUS)},
+		"town": {"name": town, "safe": Vector3(c.x, c.y, RADIUS), "inn": door},
 	}

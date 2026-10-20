@@ -69,6 +69,9 @@ func _status_text() -> String:
 		line += " · on foot · breath %d%%%s · cart %d m away" % [roundi(g.breath * 100), " (out of breath)" if g.out_of_breath else "", roundi(g.cart_distance() / Game.PX_PER_METRE)]
 	else:
 		line += " · %d km/h · horse %d%%%s" % [g.speed_kmh(), roundi(g.stamina * 100), " (winded)" if g.winded else (" (galloping)" if g.galloping else "")]
+	var change := DayNight.until_change(g.clock)
+	line += " · Day %d, %s (%s in %d:%02d)" % [g.day(), DayNight.phase(g.clock),
+		"dawn" if DayNight.is_night(g.clock) or DayNight.phase(g.clock) == "dusk" else "dusk", floori(change / 60), floori(change) % 60]
 	if g.banner and g.banner.t > 0:
 		line += "   ·   %s — %s" % [g.banner.title, g.banner.sub]
 	lines.append(line)
@@ -93,6 +96,9 @@ func _status_text() -> String:
 
 
 func _draw() -> void:
+	# Waking at the inn: the screen fades back in
+	if game.rest_fade > 0:
+		draw_rect(Rect2(Vector2.ZERO, size), Color(0, 0, 0, game.rest_fade))
 	var tether := _tether_view()
 	if tether.is_empty():
 		return

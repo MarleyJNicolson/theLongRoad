@@ -84,7 +84,9 @@ static func _burning(b: Build, spots: Array) -> Dictionary:
 	var deepest := 0.0
 	for spot in spots:
 		var at: Vector2 = spot[0]
-		fires.append({"g": b.stand(Structures.flames(), at.x, at.y, spot[1]), "at": at, "seed": randf_range(0, 10)})
+		var flame := b.stand(Structures.flames(), at.x, at.y, spot[1])
+		flame.add_child(Glow.light(90, Color("#ff8a2c"), 1.0))
+		fires.append({"g": flame, "at": at, "seed": randf_range(0, 10)})
 		deepest = maxf(deepest, spot[1])
 	var smoke := b.stand(Node2D.new(), 0, 0, deepest + 1)
 	var puffs := []
