@@ -484,6 +484,12 @@ func blocks(toward: Vector2) -> bool:
 	return Vector2.from_angle(facing).dot(toward.normalized()) > cos(SHIELD_ARC)
 
 
+# A shot turned by the shield: it does nothing, but they know you're there.
+func deflect() -> void:
+	provoked = true
+	block_flash = 0.15
+
+
 # The shield takes the blow. Returns true if that broke it (it's gone, and
 # they're quicker without it).
 func hit_shield(amount: int, dir_x: float, dir_y: float) -> bool:

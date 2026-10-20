@@ -65,8 +65,9 @@ func update(dt: float, enemies: Enemies) -> Array:
 				target = e
 				break
 		if target and target.blocks(-s.dir):
-			# Into their shield: it takes the damage, the shot drops
-			target.hit_shield(s.damage, s.dir.x, s.dir.y)
+			# Into their shield: it glances off, doing nothing (only blows
+			# wear a shield down)
+			target.deflect()
 			Sfx.play("block", target.position, -2.0)
 			s.gone = not s.lobbed
 		elif target:
