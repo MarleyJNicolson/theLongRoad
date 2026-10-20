@@ -91,6 +91,9 @@ var cart_back: Painter
 var cart_front: Painter
 var horse: Painter
 var driver: Node2D # the seat the driver's rig sits on
+var riders: Array = [] # companions in the back (see Companion), each on a seat
+# Seats in the back of the cart, on the cargo (forward, right).
+const SEATS := [Vector2(-6, -6), Vector2(-6, 6), Vector2(-15, 0)]
 var rig: Rig
 var aim := 0.0 # where the driver is looking, relative to the cart
 var lantern: PointLight2D
@@ -110,7 +113,7 @@ func _init(layer: Node2D, x_: float, y_: float, heading_: float) -> void:
 	cart_front = Painter.new(func(ci: CanvasItem) -> void: _draw_cart(ci, false))
 	# The driver on the bench: a seated peasant
 	driver = Node2D.new()
-	rig = Rig.new({"skin": "#d9b08c", "shirt": "#6b5b3e", "legs": "#4a3a2b", "head": "straw"})
+	rig = Rig.new(Peasant.LOOK)
 	rig.seated = true
 	rig.always = true
 	rig.seat_z = CART.floor + 9
@@ -125,6 +128,15 @@ func _init(layer: Node2D, x_: float, y_: float, heading_: float) -> void:
 	layer.add_child(shafts)
 	layer.add_child(cart)
 	layer.add_child(horse)
+	render()
+
+
+# A companion climbs aboard, onto their seat.
+func add_rider(rider: Node2D) -> void:
+	riders.append(rider)
+	cart.add_child(rider)
+	cart.move_child(rider, cart_front.get_index())
+	rider.rig.seat_z = CART.floor + 7
 	render()
 
 
@@ -253,7 +265,18 @@ func render(dt := 0.0) -> void:
 	cart.position = Vector2(cart_x, cart_y)
 	cart_back.queue_redraw()
 	cart_front.queue_redraw()
-	driver.position = View.new(cart_heading).xy(12, 0)
+	var P := View.new(cart_heading)
+	driver.position = P.xy(12, 0)
+	for r in riders:
+		r.position = P.xy(SEATS[r.seat].x, SEATS[r.seat].y)
+	# Everyone aboard sits between the cart's far and near sides, the nearest
+	# to the camera drawn last
+	if riders:
+		var aboard: Array = [driver] + riders
+		aboard.sort_custom(func(p: Node2D, q: Node2D) -> bool: return p.position.y < q.position.y)
+		for n in aboard.size():
+			if aboard[n].get_index() != 1 + n:
+				cart.move_child(aboard[n], 1 + n)
 	lantern.position = View.new(cart_heading).xy(18, 0, 26)
 	rig.update(dt, cart_heading + aim, 0)
 	# Nearer the bottom of the screen draws in front

@@ -47,6 +47,14 @@ static func straight_at(px: float) -> bool:
 	return absf(metres_of(k) * PX_PER_METRE - px) <= STRAIGHT
 
 
+# Which town (from 0) is nearest `along_px`.
+static func index_of(along_px: float) -> int:
+	var k := 0
+	while absf(metres_of(k + 1) * PX_PER_METRE - along_px) < absf(metres_of(k) * PX_PER_METRE - along_px):
+		k += 1
+	return k
+
+
 # The name of the town nearest `along_px` (its road point may be a little
 # either side of the exact distance).
 static func town_name(along_px: float) -> String:
@@ -166,6 +174,19 @@ static func build(b: Build) -> Dictionary:
 		b.stand(v, at.x, at.y)
 		folk.append(v)
 
+	# Someone by the inn looking for work: an archer who'll ride with you and
+	# defend the cart. The first town's comes along for nothing; later ones
+	# want paying.
+	var hirelings := []
+	var k := index_of(Road.along(b.i))
+	var hire_at: Vector2 = side_of.call(30, 135)
+	var hand := Folk.new(Companion.KINDS.archer.look, hire_at.x, hire_at.y, (-f.n).angle(), 0)
+	hand.rig.offhand = "bow"
+	b.stand(hand, hire_at.x, hire_at.y)
+	solids.append(Vector3(hire_at.x, hire_at.y, 8))
+	hirelings.append({"kind": "archer", "who": Companion.NAMES[(k * 3 + randi() % 3) % Companion.NAMES.size()],
+		"price": 0 if k == 0 else 20 + 15 * k, "x": hire_at.x, "y": hire_at.y, "figure": hand, "hired": false})
+
 	# A fingerpost on the way in
 	var post_at: Vector2 = side_of.call(-(RADIUS + 260), Road.ROAD_WIDTH / 2 + 70)
 	SideRoads._signpost(b, post_at, false, town, roundi((RADIUS + 260) / PX_PER_METRE), false)
@@ -175,11 +196,15 @@ static func build(b: Build) -> Dictionary:
 			v.update(dt)
 		for t in traders:
 			t.figure.update(dt)
+		for h in hirelings:
+			if not h.hired:
+				h.figure.update(dt)
 	return {
 		"members": [],
 		"solids": solids,
 		"loot": [],
 		"traders": traders,
+		"hirelings": hirelings,
 		"zones": [Vector3(c.x, c.y, RADIUS + 20)],
 		"trigger": Vector3(c.x, c.y, 0),
 		"animate": animate,

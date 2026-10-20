@@ -99,6 +99,16 @@ func traders() -> Array:
 	return out
 
 
+# Folk in towns who'd come along with you, not yet taken on.
+func hirelings() -> Array:
+	var out := []
+	for e in list:
+		for h in e.get("hirelings", []):
+			if not h.hired:
+				out.append(h)
+	return out
+
+
 # Is `at` on any side road?
 func on_side_road(at: Vector2) -> bool:
 	for e in list:

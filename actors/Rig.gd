@@ -86,7 +86,7 @@ const FLETCH := C_E8E0C8
 
 # The parts of a figure, drawn far to near (see _draw), and the four limbs:
 # [joints..., width, style colour, end radius, end style colour]
-enum { PART_LIMB, PART_TORSO, PART_QUIVER, PART_HEAD, PART_WEAPON, PART_OFFHAND, PART_SHAFT }
+enum { PART_LIMB, PART_TORSO, PART_QUIVER, PART_HEAD, PART_WEAPON, PART_OFFHAND, PART_SHAFT, PART_PAULDRON }
 const LIMBS := [
 	["hipL", "kneeL", "footL", 3.4, "legs", 1.9, "boots"],
 	["hipR", "kneeR", "footR", 3.4, "legs", 1.9, "boots"],
@@ -104,8 +104,9 @@ class Particle:
 		prev = prev_
 
 
-# style: { scale, skin, shirt, legs, boots, head: straw|hood|goblin|orc|helm|hat|hair|kerchief,
-#          head_colour, mask, extras: [quiver, cape, ears, apron], cape_colour, apron }
+# style: { scale, skin, shirt, legs, boots, head: straw|hood|goblin|orc|helm|hat|hair|kerchief|cap,
+#          head_colour, mask, extras: [quiver, cape, ears, apron, pauldrons], cape_colour, apron,
+#          helm_colour, crest, visor, pauldron_colour, chest: quilted|mail|plate }
 var style: Dictionary
 var k: float # scale
 var facing := PI / 2
@@ -152,12 +153,18 @@ var _cell := Vector2i(-1, -1)
 
 
 func _init(style_: Dictionary) -> void:
+	restyle(style_)
+
+
+# Change how the figure looks (what armour the peasant wears, say).
+func restyle(style_: Dictionary) -> void:
 	style = {"scale": 1.0, "boots": "#2b221c", "extras": []}
 	style.merge(style_, true)
-	for key in ["skin", "shirt", "legs", "boots", "head_colour", "mask", "cape_colour", "apron"]:
+	for key in ["skin", "shirt", "legs", "boots", "head_colour", "mask", "cape_colour", "apron", "helm_colour", "pauldron_colour"]:
 		if style.has(key) and style[key] is String:
 			style[key] = Color(style[key])
 	k = style.scale
+	_last_look = [] # (redraw)
 	weapon = style.get("weapon")
 	offhand = style.get("offhand")
 	_frame = pose()
@@ -575,6 +582,10 @@ func _draw() -> void:
 		off = ragdoll.offhand if ragdoll else offhand
 	if off:
 		parts.append([pts.handL.z + 0.02, PART_OFFHAND, off])
+	# Shoulder armour sits over the top of each arm
+	if _has_extra("pauldrons"):
+		parts.append([maxf(pts.shL.z, parts[2][0]) + 0.01, PART_PAULDRON, "shL"])
+		parts.append([maxf(pts.shR.z, parts[3][0]) + 0.01, PART_PAULDRON, "shR"])
 	for s in stuck:
 		var d: float = lerpf(pts[s.a].z, pts[s.b].z, s.t) - sin(facing + s.rel) * 2
 		parts.append([d, PART_SHAFT, s])
@@ -603,6 +614,12 @@ func _draw() -> void:
 				_draw_offhand(pts, part[2])
 			PART_SHAFT:
 				_draw_shaft(pts, part[2])
+			PART_PAULDRON:
+				var at := _xy(pts[part[2]])
+				var plate: Color = st.get("pauldron_colour", C_A6AEB7)
+				_ellipse(at, 3.4 * k, 2.6 * k, plate.darkened(0.35))
+				_ellipse(at - Vector2(0, 0.5 * k), 2.8 * k, 2.0 * k, plate)
+				_ellipse(at - Vector2(0.6, 1.0) * k, 1.2 * k, 0.8 * k, plate.lightened(0.3))
 
 
 static func _nearer(p: Array, q: Array) -> bool:
@@ -618,6 +635,20 @@ func _draw_torso(pts: Dictionary) -> void:
 	var neck := _xy(pts.neck)
 	_line((hip_l + hip_r) / 2, neck, 8 * k, st.shirt)
 	_poly([sh_l, sh_r, hip_r, hip_l], st.shirt)
+	# What the chest is armoured with
+	match st.get("chest", ""):
+		"quilted": # stitched in rows
+			for t in [0.3, 0.55, 0.8]:
+				_line(sh_l.lerp(hip_l, t), sh_r.lerp(hip_r, t), 0.8, Color(st.shirt.darkened(0.25), 0.8))
+		"mail": # rings, in bands of light and dark
+			for t in [0.2, 0.4, 0.6, 0.8]:
+				_line(sh_l.lerp(hip_l, t), sh_r.lerp(hip_r, t), 1.0, Color(st.shirt.darkened(0.3), 0.7))
+				_line(sh_l.lerp(hip_l, t + 0.08), sh_r.lerp(hip_r, t + 0.08), 0.6, Color(st.shirt.lightened(0.3), 0.6))
+		"plate": # a breastplate, with a ridge down the middle catching the light
+			var mid_top := (sh_l + sh_r) / 2
+			var mid_low := (hip_l + hip_r) / 2
+			_poly([sh_l.lerp(sh_r, 0.15), sh_r.lerp(sh_l, 0.15), hip_r.lerp(hip_l, 0.2), hip_l.lerp(hip_r, 0.2)], st.shirt.lightened(0.15))
+			_line(mid_top.lerp(mid_low, 0.1), mid_top.lerp(mid_low, 0.85), 1.2, st.shirt.lightened(0.45))
 	# Belt
 	_line(hip_l, hip_r, 2 * k, C_2B221C)
 	if _has_extra("apron"):
@@ -666,10 +697,22 @@ func _draw_head(at: Vector2) -> void:
 				if st.has("mask"):
 					draw_rect(Rect2(at.x + fx - r * 0.7, at.y + r * 0.15, r * 1.4, r * 0.45), st.mask)
 		"helm":
-			Draw.circle(self, at - Vector2(0, r * 0.1), r * 1.12, C_A6AEB7)
-			if faces_us:
-				draw_rect(Rect2(at.x + fx - r * 0.6, at.y - r * 0.15, r * 1.2, r * 0.22), ink)
-			draw_rect(Rect2(at.x - r * 0.15, at.y - r * 1.2, r * 0.3, r * 0.6), C_7D8590)
+			var steel: Color = st.get("helm_colour", C_A6AEB7)
+			Draw.circle(self, at - Vector2(0, r * 0.1), r * 1.12, steel)
+			_ellipse(at - Vector2(r * 0.35, r * 0.6), r * 0.4, r * 0.25, steel.lightened(0.3))
+			if st.get("visor", true):
+				if faces_us:
+					draw_rect(Rect2(at.x + fx - r * 0.6, at.y - r * 0.15, r * 1.2, r * 0.22), ink)
+			elif faces_us: # an open pot helm: the face shows under the rim
+				Draw.circle(self, at + Vector2(fx, r * 0.25), r * 0.62, skin)
+				eyes.call(ink, 0.8)
+				draw_rect(Rect2(at.x - r * 1.15, at.y - r * 0.2, r * 2.3, r * 0.25), steel.darkened(0.3))
+			if st.get("crest", true):
+				draw_rect(Rect2(at.x - r * 0.15, at.y - r * 1.2, r * 0.3, r * 0.6), C_7D8590)
+		"cap": # a leather skullcap
+			eyes.call(ink, 0.8)
+			_ellipse(at - Vector2(0, r * 0.45), r * 1.08, r * 0.78, st.head_colour)
+			draw_rect(Rect2(at.x - r * 1.05, at.y - r * 0.3, r * 2.1, r * 0.22), st.head_colour.darkened(0.3))
 		"hat":
 			eyes.call(ink, 0.8)
 			_ellipse(at - Vector2(0, r * 0.55), r * 2.1, r * 0.7, st.head_colour)

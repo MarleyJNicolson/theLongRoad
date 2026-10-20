@@ -17,6 +17,32 @@ const MELEE := {"club": "club", "sword": "sword", "spear": "spear", "axe": "axe"
 const RANGED := {"bow": "bow", "crossbow": "crossbow", "sling": "sling", "shield": "shield"}
 const BLOCKING_SPEED := 0.6 # walking pace behind a raised shield
 
+# How the peasant looks in plain clothes, and what each piece of armour
+# changes (by slot, then tier).
+const LOOK := {"skin": "#d9b08c", "shirt": "#6b5b3e", "legs": "#4a3a2b", "head": "straw"}
+const ARMOUR_LOOKS := {
+	"helmet": {
+		1: {"head": "cap", "head_colour": "#6e4a28"},
+		2: {"head": "helm", "helm_colour": "#8a9096", "visor": false, "crest": false},
+		3: {"head": "helm", "helm_colour": "#c9cfd6", "visor": true, "crest": true},
+	},
+	"shoulders": {
+		1: {"pauldron_colour": "#b8a47e"},
+		2: {"pauldron_colour": "#7a5230"},
+		3: {"pauldron_colour": "#c9cfd6"},
+	},
+	"body": {
+		1: {"shirt": "#b8a47e", "chest": "quilted"},
+		2: {"shirt": "#8a9096", "chest": "mail"},
+		3: {"shirt": "#aab2bb", "chest": "plate"},
+	},
+	"legs": {
+		1: {"legs": "#5e3f22", "boots": "#3d2a18"},
+		2: {"legs": "#7d8590"},
+		3: {"legs": "#a6aeb7", "boots": "#c9cfd6"},
+	},
+}
+
 var vx := 0.0
 var vy := 0.0
 var facing := 0.0
@@ -25,7 +51,7 @@ var rig: Rig
 
 
 func _init() -> void:
-	rig = Rig.new({"skin": "#d9b08c", "shirt": "#6b5b3e", "legs": "#4a3a2b", "head": "straw"})
+	rig = Rig.new(LOOK)
 	rig.always = true
 	add_child(rig)
 	visible = false
@@ -45,6 +71,20 @@ func place(x: float, y: float) -> void:
 
 func hide_peasant() -> void:
 	visible = false
+
+
+# The peasant's look wearing `equipment` (armour shows; see ARMOUR_LOOKS).
+static func dressed(equipment: Dictionary) -> Dictionary:
+	var look := LOOK.duplicate()
+	var extras := []
+	for slot in ARMOUR_LOOKS:
+		var item: Variant = equipment.get(slot)
+		if item:
+			look.merge(ARMOUR_LOOKS[slot][item.tier], true)
+			if slot == "shoulders":
+				extras.append("pauldrons")
+	look.extras = extras
+	return look
 
 
 # --- What Game uses to put weapons in hand and play attacks ---

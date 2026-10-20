@@ -126,6 +126,8 @@ var cart_store: Array = []
 var bag_open := false
 var cart_open := false
 var blocking := false # holding a shield up (right mouse)
+var companions: Array = [] # who rides along to defend the cart (see Companion)
+var _dressed_as: Array = [] # the armour the peasant was last drawn in
 
 
 func _ready() -> void:
@@ -233,6 +235,8 @@ func reset() -> void:
 	strikes = []
 	swings = []
 	out_of_ammo_at = -9.0
+	companions = []
+	_dressed_as = []
 	bag = []
 	bag.resize(Items.BAG_SIZE)
 	cart_store = []
@@ -391,6 +395,8 @@ func _process(delta: float) -> void:
 		hurt(b.damage, b.faction, false, b.from)
 	for h in enemy_arrows.update(dt, targets, solids):
 		hurt(h.damage, h.faction, true, h.from)
+	for c in companions:
+		c.update(dt, cart.cart_heading, enemies, missiles)
 	for e in missiles.update(dt, enemies):
 		_on_kill(e)
 	_mark("arrows+missiles")
@@ -998,6 +1004,13 @@ func melee() -> Dictionary:
 # the right hand, a bow, crossbow or sling in the left. Only the weapon in hand
 # is drawn; the other is slung on your back.
 func _update_held_weapon(_dt: float) -> void:
+	# Armour shows on the peasant (and the driver, the same person)
+	var worn := [equipment.helmet, equipment.shoulders, equipment.body, equipment.legs]
+	if worn != _dressed_as:
+		_dressed_as = worn
+		var look := Peasant.dressed(equipment)
+		peasant.rig.restyle(look)
+		cart.rig.restyle(look)
 	var stocked := ammo_count(ranged().ammo) > 0
 	# The next shot is drawn back as the weapon reloads: full draw = ready
 	var draw := clampf(1 - throw_cooldown / ranged().cooldown, 0, 1)
@@ -1338,6 +1351,10 @@ func _interaction() -> Variant:
 		return {"label": "E – Take arrows from the barrel", "x": best_loot.x, "y": best_loot.y, "act": func() -> void: raid_barrel(best_loot)}
 	if best_loot:
 		return {"label": "E – Open the treasure chest", "x": best_loot.x, "y": best_loot.y, "act": func() -> void: search(best_loot)}
+	for h in encounters.hirelings():
+		if Vector2(h.x, h.y).distance_to(p) < TRADE_REACH:
+			var offer: String = "Take on %s the %s" % [h.who, h.kind] if h.price == 0 else "Hire %s the %s for %d gold" % [h.who, h.kind, h.price]
+			return {"label": "E – " + offer, "x": h.x, "y": h.y, "act": func() -> void: hire(h)}
 	for t in encounters.traders():
 		if Vector2(t.x, t.y).distance_to(p) < TRADE_REACH:
 			var open: bool = trading == t
@@ -1351,6 +1368,24 @@ func _interaction() -> Variant:
 	if Vector2(cart.cart_x, cart.cart_y).distance_to(p) < MOUNT_REACH:
 		return {"label": "E – Climb back on the cart", "x": cart.cart_x, "y": cart.cart_y, "act": mount}
 	return null
+
+
+# Take on a hireling: they leave their spot and ride in the back of the cart.
+func hire(h: Dictionary) -> void:
+	if companions.size() >= HorseCart.SEATS.size():
+		say("There's no room left on the cart")
+		return
+	if gold < h.price:
+		say("%s wants %d gold – you have %d" % [h.who, h.price, gold])
+		return
+	gold -= h.price
+	h.hired = true
+	h.figure.visible = false
+	var c := Companion.new(h.kind, h.who)
+	c.seat = companions.size()
+	cart.add_rider(c)
+	companions.append(c)
+	say("%s climbs onto the cart, bow in hand" % h.who)
 
 
 func dismount() -> void:
@@ -1612,6 +1647,10 @@ func debug_key(event: InputEvent) -> void:
 		debug_spawn()
 	elif event.keycode == KEY_F5:
 		debug_wave(300)
+	elif event.keycode == KEY_F7:
+		hire({"kind": "archer", "who": Companion.NAMES[randi() % Companion.NAMES.size()], "price": 0, "figure": Node2D.new(), "hired": false})
+	elif event.keycode == KEY_F8:
+		_debug_dress()
 	elif event.keycode == KEY_F6:
 		_debug_cycle("offhand", ["Wooden Buckler", "Iron-rimmed Shield", "Kite Shield", "Leather Quiver", "Hunter’s Quiver", "Great Quiver"])
 
@@ -1635,6 +1674,18 @@ func _debug_cycle(slot: String, names: Array) -> void:
 
 # Debug: F5 sends a huge wave at you from all sides, to feel the scale: the
 # region's raiders, with archers and heavies among them.
+# F8: put on the next tier of every piece of armour (then none again).
+func _debug_dress() -> void:
+	var tier: int = equipment.body.tier + 1 if equipment.body else 1
+	for slot in ["helmet", "shoulders", "body", "legs"]:
+		equipment[slot] = null
+		if tier <= 3:
+			for item in Items.ITEMS:
+				if item.slot == slot and item.tier == tier:
+					equipment[slot] = item.duplicate()
+	say("Tier %d armour" % tier if tier <= 3 else "No armour")
+
+
 func debug_wave(count: int) -> void:
 	var me := player()
 	var biome: Dictionary = Threat.stage_at(metres).biome

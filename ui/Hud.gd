@@ -85,13 +85,15 @@ func _status_text() -> String:
 		ammo = " · %d %s (%s)" % [g.ammo_count(weapon.ammo), weapon.ammo, "bag" if g.on_foot else "cart + bag"]
 	lines.append("hearts %d/%d · cart %d/%d · %s in hand%s · felled %d · gold %d" % [
 		g.health, Game.MAX_HEALTH, g.cart_health, Game.MAX_CART_HEALTH, weapon.name, ammo, g.kills, g.gold])
+	if g.companions:
+		lines.append("riding with you: " + ", ".join(g.companions.map(func(c: Companion) -> String: return c.title())))
 	if g.state == "over":
 		lines.append("%s — %s.   Space / R to try again" % [g.over_reason.title, g.over_reason.text])
 	elif g.on_foot:
 		lines.append("WASD walk · Shift sprint · Ctrl/Space dash · E climb on (at the cart) · click attack · R swap · hold right mouse: shield")
 	else:
 		lines.append("W/S drive · A/D steer · Shift gallop · E get down · click attack · R swap · hold right mouse: shield")
-	lines.append("Debug: F2 ranged weapon · F3 melee weapon · F4 raiders · F5 huge wave · F6 off hand · 1-4 zoom · F1 filter")
+	lines.append("Debug: F2 ranged weapon · F3 melee weapon · F4 raiders · F5 huge wave · F6 off hand · F7 archer · F8 armour · 1-4 zoom · F1 filter")
 	if g.interaction and g.interaction.label:
 		lines.append(g.interaction.label)
 	if g.toast:
