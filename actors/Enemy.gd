@@ -108,7 +108,6 @@ var rig: Rig
 var figure: Node2D
 var bar: Painter
 var marker: Sketch
-var pool: Sketch
 var aura: Sketch # an elite's ring
 var fallen_layer: Node2D # where the body goes when it falls (under the living)
 
@@ -220,11 +219,6 @@ func update(dt: float, target: Dictionary, relentless: bool, victims: Array = []
 		if not dying:
 			_fall()
 		dying += dt
-		pool.scale = Vector2.ONE * minf(1.0, dying / 1.5)
-		# The blood gathers under the body wherever it came to rest
-		var parts: Dictionary = rig.ragdoll.parts
-		var hips: Vector3 = (parts.hipL.p + parts.hipR.p) / 2
-		pool.position = Vector2(hips.x, hips.y)
 	elif state == "chase":
 		if not relentless and position.distance_to(Vector2(home.x, home.y)) > leash:
 			state = "return"
@@ -437,18 +431,12 @@ func seek(dt: float, tx: float, ty: float, top: float, arrive := false, keep_fac
 
 
 # Go down: the body goes limp and falls as a ragdoll, flung by the blow that
-# killed it, darkening, in a slowly spreading pool of blood.
+# killed it, darkening (the blood is spattered by the hit: see Blood).
 func _fall() -> void:
 	rig.die(last_hit.x, last_hit.y, last_hit.force)
 	vx = 0.0
 	vy = 0.0
 	figure.modulate = Color("#8a7e72")
-	pool = Sketch.new()
-	pool.ellipse(Vector2.ZERO, radius * 1.3, radius * 0.7, Color("#4a1514", 0.85))
-	pool.ellipse(Vector2(radius * 0.4, radius * 0.1), radius * 0.6, radius * 0.3, Color("#76201a", 0.6))
-	pool.scale = Vector2.ZERO
-	add_child(pool)
-	move_child(pool, 0)
 	in_hiding = false # killed in their hiding place: they tumble out
 	drop_blow()
 	bar.visible = false
@@ -507,6 +495,8 @@ func _redraw_kit() -> void:
 func hit(dir_x: float, dir_y: float, dmg := 1, force := 1.0) -> void:
 	hp -= maxi(1, dmg - armour)
 	provoked = true
+	if Blood.current:
+		Blood.current.hit(position, Vector2(dir_x, dir_y), not alive())
 	last_hit = {"x": dir_x, "y": dir_y, "force": force}
 	bar.queue_redraw()
 	if not alive():

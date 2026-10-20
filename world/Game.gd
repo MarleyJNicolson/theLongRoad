@@ -103,6 +103,7 @@ var shake := 0.0
 
 var enemies: Enemies
 var missiles: Missiles
+var blood: Blood
 var enemy_arrows: EnemyArrows
 var aim_line: Painter
 var state := "playing" # or "over"
@@ -197,6 +198,8 @@ func reset() -> void:
 	rest_fade = 0.0
 	missiles = Missiles.new(air)
 	enemy_arrows = EnemyArrows.new(air)
+	blood = Blood.new(fx, air)
+	Blood.current = blood
 	aim_line = Painter.new(_draw_aim)
 	aim.add_child(aim_line)
 	pickups = []
@@ -415,6 +418,7 @@ func _process(delta: float) -> void:
 		guard.update(dt, guard.get_meta("post"), enemies, missiles)
 	for e in missiles.update(dt, enemies):
 		_on_kill(e)
+	blood.update(dt)
 	_mark("arrows+missiles")
 	_update_melee(dt, from)
 	_update_held_weapon(dt)
@@ -1197,6 +1201,10 @@ func _strike(from: Dictionary, s: Dictionary) -> void:
 			t.e.hit_shield(s.damage * (2 if s.fx == "heavy" else 1), t.dx / d, t.dy / d)
 			continue
 		t.e.hit(t.dx / d, t.dy / d, s.damage, s.get("force", 1.0))
+		# A killing cut sprays blood along the swing of the blade
+		if not t.e.alive() and (s.fx == "slash" or s.fx == "heavy"):
+			var sweep := Vector2(-ay, ax) * (-1.0 if s.get("back", false) else 1.0)
+			blood.spray(t.e.position, Vector2(t.dx, t.dy), sweep)
 		if not t.e.alive():
 			_on_kill(t.e)
 	if s.fx == "heavy" and not hit.is_empty():
@@ -1318,6 +1326,8 @@ func hurt(dmg: int, faction: String, arrow: bool, from := Vector2.INF) -> void:
 	var goblins := faction == "goblin"
 	if on_foot:
 		health = maxi(0, health - dmg)
+		var struck := peasant.position - from if from != Vector2.INF else Vector2.from_angle(randf() * TAU)
+		blood.hit(peasant.position, struck, health <= 0)
 		if health > 0:
 			return
 		if arrow:
