@@ -66,6 +66,7 @@ var road: Road
 var scenery: Scenery
 var encounters: Encounters
 var trading: Variant = null # the trader whose wares are on show
+var town: Variant = null # the town you're in, if any: { name, safe }
 var cart: HorseCart
 var peasant: Peasant
 var marker: Painter
@@ -163,6 +164,7 @@ func reset() -> void:
 	encounters.on_new_zones = scenery.clear
 	scenery.update(0)
 	trading = null
+	town = null
 	missiles = Missiles.new(air)
 	enemy_arrows = EnemyArrows.new(air)
 	aim_line = Painter.new(_draw_aim)
@@ -333,7 +335,12 @@ func _process(delta: float) -> void:
 
 	var from := player()
 	_update_throwing(dt, from)
+	Enemies.safe_zones = encounters.towns().map(func(t: Dictionary) -> Vector3: return t.safe)
 	encounters.update(dt, from, road_index)
+	var here: Variant = encounters.town_at(Vector2(from.x, from.y))
+	if here and here != town:
+		_arrive(here)
+	town = here
 	# On foot, the cart is just in the way and raiders go round it.
 	var bodies := []
 	for b in cart.bodies():
@@ -484,6 +491,25 @@ func add_to_bag(entry: Dictionary) -> bool:
 		return false
 	bag[free] = entry.duplicate()
 	return true
+
+
+# --- Towns ------------------------------------------------------------------
+
+# Into a town: safe from raiders, and the townsfolk mend the cart, bind your
+# wounds and rest the horse, free of charge.
+func _arrive(place: Dictionary) -> void:
+	var mended := health < MAX_HEALTH or cart_health < MAX_CART_HEALTH
+	health = MAX_HEALTH
+	cart_health = MAX_CART_HEALTH
+	stamina = 1.0
+	winded = false
+	breath = 1.0
+	out_of_breath = false
+	banner = {"title": place.name, "sub": Towns.MOTTO, "t": STAGE_BANNER_TIME}
+	if mended:
+		say("The folk of %s mend your cart and bind your wounds" % place.name, 1.5)
+	else:
+		say("You rest awhile in %s" % place.name, 1.5)
 
 
 # --- Bag and cart storage ----------------------------------------------------
@@ -1318,7 +1344,8 @@ func _read_debug_args() -> void:
 		elif arg.begins_with("--metres="):
 			Road.start_along = float(arg.trim_prefix("--metres=")) * PX_PER_METRE
 		elif arg.begins_with("--visit="):
-			debug_visit = int(arg.trim_prefix("--visit="))
+			var which := arg.trim_prefix("--visit=")
+			debug_visit = -2 if which == "town" else int(which)
 		elif arg.begins_with("--goto="):
 			debug_goto = arg.trim_prefix("--goto=")
 		elif arg == "--autodrive":
@@ -1434,8 +1461,11 @@ func update_camera(dt: float) -> void:
 		target = Vector2(cart.x + cos(cart.heading) * lead, cart.y + sin(cart.heading) * lead)
 		keep = [Vector2(cart.x, cart.y), Vector2(cart.cart_x, cart.cart_y)]
 
-	if debug_visit >= 0 and debug_visit < encounters.list.size():
-		var t: Vector3 = encounters.list[debug_visit].trigger
+	var visiting := debug_visit
+	if debug_visit == -2: # the first town
+		visiting = encounters.list.find_custom(func(e: Dictionary) -> bool: return e.has("town"))
+	if visiting >= 0 and visiting < encounters.list.size():
+		var t: Vector3 = encounters.list[visiting].trigger
 		target = Vector2(t.x, t.y)
 		keep = [target]
 		cam = target

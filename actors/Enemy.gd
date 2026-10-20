@@ -214,6 +214,10 @@ func update(dt: float, target: Dictionary, relentless: bool, victims: Array = []
 	elif state == "chase":
 		if not relentless and position.distance_to(Vector2(home.x, home.y)) > leash:
 			state = "return"
+		# Nobody follows you into a town
+		for z: Vector3 in Enemies.safe_zones:
+			if Vector2(target.x, target.y).distance_to(Vector2(z.x, z.y)) < z.z + 40:
+				state = "return"
 		# Archers only use their fists in a brawl
 		var brawling: bool = not shoots or archery.mode == "melee"
 		if blow:

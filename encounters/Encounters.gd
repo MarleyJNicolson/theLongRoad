@@ -43,6 +43,7 @@ var time := 0.0
 var rewards: Array = [] # { gold, x, y, message? } earned by clearing out raids
 var on_new_zones: Callable # called with zones that appear where scenery already is
 var last_side_road := FIRST_SIDE_ROAD_BY - MAX_SIDE_ROAD_GAP # metres
+var next_town := Towns.next_along(Road.start_along + 1) # px along the road
 
 
 func _init(layer_: Node2D, upright_: Node2D, road_: Road, enemies_: Enemies) -> void:
@@ -50,6 +51,23 @@ func _init(layer_: Node2D, upright_: Node2D, road_: Road, enemies_: Enemies) -> 
 	upright = upright_
 	road = road_
 	enemies = enemies_
+
+
+# Towns on the road so far: { name, safe: Vector3(x, y, radius) }.
+func towns() -> Array:
+	var out := []
+	for e in list:
+		if e.has("town"):
+			out.append(e.town)
+	return out
+
+
+# The town whose walls `at` is inside, or null.
+func town_at(at: Vector2) -> Variant:
+	for t in towns():
+		if at.distance_to(Vector2(t.safe.x, t.safe.y)) < t.safe.z:
+			return t
+	return null
 
 
 func zones() -> Array:
@@ -129,6 +147,20 @@ static func _make(entry: Dictionary, b: Build) -> Variant:
 func place() -> void:
 	while next_index < road.points.size() - 5:
 		var i := next_index
+		# A town ahead: nothing is placed near it, and it waits until the road
+		# runs right through it
+		var town_i := roundi((next_town - Road.start_along) / Road.SEGMENT)
+		var clear := ceili(Towns.CLEAR / Road.SEGMENT)
+		if i >= town_i - clear:
+			if town_i + clear >= road.points.size() - 5:
+				return
+			if town_i >= 3: # (not one behind where the road starts)
+				_place_town(town_i)
+			next_town = Towns.next_along(next_town + 1)
+			next_index = maxi(i, town_i + clear)
+			continue
+		# No turning off just before a town: what's down it would crowd the walls
+		var town_soon := i >= town_i - clear - ceili((Towns.RADIUS + Destinations.DEST_RADIUS + 400) / Road.SEGMENT)
 		# Raiders are as tough as the stretch of road they're found on.
 		var metres := Road.along(i) / 20.0
 		var threat := Threat.threat_at(metres)
@@ -137,13 +169,14 @@ func place() -> void:
 		var view := Node2D.new()
 		layer.add_child(view)
 		var b := Build.new(view, upright, road, i, zones(), metres / 500.0, threat.extra_members, enemies)
+		b.towns = towns().map(func(t: Dictionary) -> Vector3: return t.safe)
 
 		# Now and then, a turning off to a village or a big camp. Its road runs
 		# back alongside existing road, so clear any trees already there.
 		var enc: Variant = null
 		var entry: Variant = null
 		var overdue := metres - last_side_road >= MAX_SIDE_ROAD_GAP
-		if metres > SIDE_ROADS_FROM and (overdue or randf() < SIDE_ROAD_CHANCE):
+		if metres > SIDE_ROADS_FROM and not town_soon and (overdue or randf() < SIDE_ROAD_CHANCE):
 			enc = SideRoads.side_road(b)
 			if enc != null:
 				last_side_road = metres
@@ -181,6 +214,21 @@ func place() -> void:
 		if entry:
 			last = entry
 		next_index += floori(threat.spacing * randf_range(0.85, 1.2))
+
+
+func _place_town(i: int) -> void:
+	var view := Node2D.new()
+	layer.add_child(view)
+	var b := Build.new(view, upright, road, i, zones(), 0, 0, enemies)
+	var town := Towns.build(b)
+	town.view = view
+	town.index = i
+	town.uprights = b.uprights
+	town.kind = "town"
+	town.cleared = false
+	if on_new_zones.is_valid():
+		on_new_zones.call(town.zones)
+	list.append(town)
 
 
 # Buildings you're standing behind fade, so you never lose sight of yourself.

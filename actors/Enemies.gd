@@ -9,6 +9,8 @@ var layer: Node2D # the y-sorted layer the living stand in
 var fallen_layer: Node2D # where the dead lie, under the living
 var list: Array = [] # Array of Enemy
 var threat: Variant = null # set by whoever is spawning (see Encounters.place)
+# Towns: Vector3(x, y, radius). Raiders won't follow you in.
+static var safe_zones: Array = []
 
 
 func _init(layer_: Node2D, fallen_layer_: Node2D) -> void:

@@ -66,6 +66,11 @@ func generate(count: int) -> void:
 			target_curve = away * 0.12
 			curve = away * maxf(absf(curve), 0.07)
 
+		# Straight through a town, gate to gate (settling in on the way)
+		if Towns.straight_at(along(points.size())):
+			target_curve = 0.0
+			curve *= 0.6
+
 		curve += (target_curve - curve) * 0.12
 		heading = UP + clampf(heading + curve - UP, -MAX_HEADING, MAX_HEADING)
 		points.append(last + Vector2(cos(heading), sin(heading)) * SEGMENT)

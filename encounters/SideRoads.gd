@@ -74,6 +74,14 @@ static func _plan_route(b: Build) -> Variant:
 			if not clear.call(points[k], Road.ROAD_WIDTH / 2 + SIDE_WIDTH / 2 + 30):
 				road_clear = false
 				break
+		# Nor round (or through) a town's walls
+		for t: Vector3 in b.towns:
+			var walls := Vector2(t.x, t.y)
+			if c.distance_to(walls) < t.z + Destinations.DEST_RADIUS + 80:
+				road_clear = false
+			for k in range(1, points.size()):
+				if points[k].distance_to(walls) < t.z + SIDE_WIDTH / 2 + 60:
+					road_clear = false
 		if road_clear:
 			return {"side": side, "points": points, "c": c, "entrance": (end - c).angle()}
 	return null

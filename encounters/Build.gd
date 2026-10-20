@@ -14,6 +14,7 @@ var upright: Node2D # the y-sorted layer shared with the people
 var road: Road
 var i: int # the main-road point it's placed at
 var zones: Array # Vector3(x, y, radius) to keep clear of
+var towns: Array = [] # towns' walls, Vector3(x, y, radius): side roads keep well clear
 var difficulty: float # +1 per 500 m
 var extra: int # room for bigger groups (Threat extra_members)
 var enemies: Enemies
