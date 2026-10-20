@@ -22,6 +22,11 @@ func living() -> Array:
 	return list.filter(func(e: Enemy) -> bool: return e.alive())
 
 
+# How likely an ordinary goblin or bandit is to carry a shield.
+func shield_chance() -> float:
+	return minf(0.25, 0.08 + (threat.level if threat else 0.0) * 0.02)
+
+
 # Ordinary goblins and bandits are sometimes archers instead (more so further
 # down the road).
 func add(type: String, x: float, y: float, home: Dictionary) -> Enemy:
@@ -29,6 +34,9 @@ func add(type: String, x: float, y: float, home: Dictionary) -> Enemy:
 		type = "goblinArcher" if type == "goblin" else "archer"
 	var enemy := Enemy.new(type, x, y, home, threat, fallen_layer)
 	layer.add_child(enemy)
+	# Some carry a shield (more of them further along)
+	if (type == "goblin" or type == "bandit") and randf() < shield_chance():
+		enemy.give_shield(4 + (threat.hp_bonus if threat else 0))
 	list.append(enemy)
 	return enemy
 
@@ -67,7 +75,7 @@ func update(dt: float, target: Dictionary, bodies: Array, relentless := false, v
 		var landed_before: bool = e.blow != null and e.blow.landed
 		e.update(step, target, relentless, victims)
 		if e.blow != null and e.blow.landed and not landed_before:
-			blows.append({"damage": e.damage, "faction": e.faction})
+			blows.append({"damage": e.damage, "faction": e.faction, "from": e.position})
 		if e.wants_shot:
 			e.wants_shot = false
 			var dist := Vector2(target.x, target.y).distance_to(e.position)

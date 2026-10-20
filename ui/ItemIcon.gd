@@ -26,6 +26,18 @@ const ICONS := {
 	"sword": [{"d": "M28 5 L33 7 L31 12 L16 27 L12 23 Z"}, {"d": "M8 20 L19 31", "line": true, "wide": true, "trim": true}, {"d": "M13 27 L7 33", "line": true, "wide": true}],
 	"spear": [{"d": "M6 35 L28 10", "line": true, "wide": true}, {"d": "M25 9 L36 3 L31 15 Z", "trim": true}],
 	"axe": [{"d": "M10 35 L26 7", "line": true, "wide": true}, {"d": "M21 5 Q36 4 33 20 L25 14 Z", "trim": true}],
+	# The off hand
+	"shield": [
+		{"d": "M20 5 Q31 8 33 12 Q33 27 20 36 Q7 27 7 12 Q9 8 20 5 Z"},
+		{"d": "M20 9 V32 M10 14 H30", "line": true, "trim": true},
+		{"d": "M17 17 H23 V23 H17 Z", "color": "#a6aeb7"},
+	],
+	"quiver": [
+		{"d": "M9 13 L23 7 L32 29 L18 35 Z"},
+		{"d": "M11 16 Q24 19 31 29", "line": true, "trim": true},
+		{"d": "M12 11 L8 3 M16 9 L13 1 M20 8 L19 1", "line": true, "color": "#8b6236"},
+		{"d": "M8 3 L6 6 M13 1 L11 4 M19 1 L17 4", "line": true, "color": "#e8e0c8"},
+	],
 	# Ammunition stacks
 	"stones": [
 		{"d": "M7 26 Q7 20 13 20 Q19 20 19 26 Q19 31 13 31 Q7 31 7 26 Z", "color": "#8d8a80"},

@@ -37,6 +37,11 @@ const LOOKS := {
 }
 
 const HIT_TINT := Color("#ff7766")
+const BLOCK_TINT := Color("#9cc8ff")
+# A shield: blocks what comes from within this angle of the way they face,
+# soaking up the damage until it breaks; they're slower carrying it.
+const SHIELD_ARC := deg_to_rad(70)
+const SHIELD_SLOW := 0.8
 const BAR_WIDTH := 22.0
 const BAR_HEIGHT := 4.0
 const ALERT_TIME := 1.2
@@ -96,6 +101,8 @@ var wants_shot := false
 var removed := false # cleared away (its camp left far behind)
 var slide_side := 0
 var held := 0.0 # time waiting for its next update (see Enemies.update)
+var shield_hp := 0 # what's left of a shield (0: none)
+var block_flash := 0.0
 
 var rig: Rig
 var figure: Node2D
@@ -141,6 +148,9 @@ func _init(type_: String, x: float, y: float, home_: Dictionary, threat: Variant
 	rig = Rig.new(look)
 	rig.facing = facing
 	rig.use_sprites = true # crowds draw from baked sheets (see SpriteBank)
+	if look.get("offhand") == "shield":
+		shield_hp = 6 + (threat.hp_bonus if threat else 0)
+		speed *= SHIELD_SLOW
 
 	# The figure, and markers above its head (an elite's ring at its feet)
 	if elite:
@@ -200,6 +210,7 @@ func engage() -> void:
 func update(dt: float, target: Dictionary, relentless: bool, victims: Array = []) -> void:
 	attack_cooldown -= dt
 	flash -= dt
+	block_flash -= dt
 	alert -= dt
 	# Aim a little ahead of the target so chasers try to cut it off.
 	var tx: float = target.x + target.vx * 0.4
@@ -251,7 +262,7 @@ func update(dt: float, target: Dictionary, relentless: bool, victims: Array = []
 	if visible != showing:
 		visible = showing
 	if alive():
-		var tint := HIT_TINT if flash > 0 else Color.WHITE
+		var tint := BLOCK_TINT if block_flash > 0 else (HIT_TINT if flash > 0 else Color.WHITE)
 		if figure.modulate != tint:
 			figure.modulate = tint
 	var alarmed := alive() and alert > 0
@@ -449,6 +460,47 @@ func _fall() -> void:
 	# The dead lie under all the living
 	if fallen_layer:
 		reparent(fallen_layer)
+
+
+# Pick up a shield (an ordinary raider who carries one).
+func give_shield(hp_: int) -> void:
+	rig.offhand = "shield"
+	shield_hp = hp_
+	speed *= SHIELD_SLOW
+	_redraw_kit()
+
+
+# Does their shield stop something coming from `toward` (the direction from
+# them to where it came from)?
+func blocks(toward: Vector2) -> bool:
+	if shield_hp <= 0 or not alive() or in_hiding or toward == Vector2.ZERO:
+		return false
+	return Vector2.from_angle(facing).dot(toward.normalized()) > cos(SHIELD_ARC)
+
+
+# The shield takes the blow. Returns true if that broke it (it's gone, and
+# they're quicker without it).
+func hit_shield(amount: int, dir_x: float, dir_y: float) -> bool:
+	shield_hp -= amount
+	provoked = true
+	block_flash = 0.15
+	vx = dir_x * 60
+	vy = dir_y * 60
+	if shield_hp > 0:
+		return false
+	shield_hp = 0
+	rig.offhand = null
+	speed /= SHIELD_SLOW
+	_redraw_kit()
+	return true
+
+
+# What they carry changed: their sprite sheet must change with it.
+func _redraw_kit() -> void:
+	if rig.has_meta("sheet_key"):
+		rig.remove_meta("sheet_key")
+	rig._sheet = null
+	rig._last_look = []
 
 
 # `force` scales the knockback (a heavy axe blow sends them flying).

@@ -16,6 +16,7 @@ var trade: TradePanel
 var equipment: EquipmentPanel
 var bag: InventoryPanel
 var cart_store: InventoryPanel
+var quiver: InventoryPanel
 var _built_at := 0.0 # the dpr the panels were built for
 
 
@@ -43,19 +44,22 @@ func _process(_delta: float) -> void:
 	equipment.refresh()
 	bag.refresh()
 	cart_store.refresh()
+	quiver.refresh()
 	trade.refresh(game.trade_view(), game.gold, dpr)
 	queue_redraw()
 
 
 # (Re)build the panels at the current scale.
 func _build_panels() -> void:
-	for panel in [equipment, bag, cart_store]:
+	for panel in [equipment, bag, cart_store, quiver]:
 		if panel:
 			panel.queue_free()
 	equipment = EquipmentPanel.new(game, dpr)
 	bag = InventoryPanel.new(game, "bag", dpr)
 	cart_store = InventoryPanel.new(game, "cart", dpr)
-	for panel in [equipment, bag, cart_store]:
+	quiver = InventoryPanel.new(game, "quiver", dpr)
+	quiver.above = bag
+	for panel in [equipment, bag, cart_store, quiver]:
 		add_child(panel)
 	_built_at = dpr
 
@@ -84,10 +88,10 @@ func _status_text() -> String:
 	if g.state == "over":
 		lines.append("%s — %s.   Space / R to try again" % [g.over_reason.title, g.over_reason.text])
 	elif g.on_foot:
-		lines.append("WASD walk · Shift sprint · Ctrl/Space dash · E climb on (at the cart) · click attack · Q swap")
+		lines.append("WASD walk · Shift sprint · Ctrl/Space dash · E climb on (at the cart) · click attack · R swap · hold right mouse: shield")
 	else:
-		lines.append("W/S drive · A/D steer · Shift gallop · E get down · click attack · Q swap")
-	lines.append("Debug: F2 ranged weapon · F3 melee weapon · F4 raiders · F5 huge wave · 1-4 zoom · F1 filter")
+		lines.append("W/S drive · A/D steer · Shift gallop · E get down · click attack · R swap · hold right mouse: shield")
+	lines.append("Debug: F2 ranged weapon · F3 melee weapon · F4 raiders · F5 huge wave · F6 off hand · 1-4 zoom · F1 filter")
 	if g.interaction and g.interaction.label:
 		lines.append(g.interaction.label)
 	if g.toast:

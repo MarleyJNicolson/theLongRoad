@@ -53,7 +53,7 @@ func update(dt: float, victims: Array, obstacles: Obstacles) -> Array:
 				hit = true
 				break
 		if hit:
-			hits.append({"damage": a.damage, "faction": a.faction})
+			hits.append({"damage": a.damage, "faction": a.faction, "from": a.pos - a.dir * 40})
 			a.stuck = 1.2 # gone at once
 			keep = true
 		elif a.left <= 0 or (a.flown > 30 and obstacles.hits(a.pos)):

@@ -3,7 +3,7 @@ extends RefCounted
 
 # Equipment the peasant can find in treasure chests (port of items.js).
 
-const SLOTS := ["helmet", "shoulders", "body", "legs", "ranged", "melee"]
+const SLOTS := ["helmet", "shoulders", "body", "legs", "ranged", "melee", "offhand"]
 
 const SLOT_NAMES := {
 	"helmet": "Helmet",
@@ -12,6 +12,7 @@ const SLOT_NAMES := {
 	"legs": "Legs",
 	"ranged": "Ranged weapon",
 	"melee": "Melee weapon",
+	"offhand": "Off-hand",
 }
 
 # Each kind of ranged weapon uses its own ammunition, carried as stacks in the
@@ -58,6 +59,17 @@ const ITEMS := [
 	{"slot": "melee", "icon": "sword", "name": "Short Sword", "tier": 2, "damage": 1, "reach": 32.0, "cooldown": 0.45, "style": "double", "arc": 1.0, "gap": 0.13},
 	{"slot": "melee", "icon": "spear", "name": "Boar Spear", "tier": 2, "damage": 2, "reach": 70.0, "cooldown": 0.5, "style": "jab", "arc": 0.22, "pierce": 2},
 	{"slot": "melee", "icon": "axe", "name": "Bearded Axe", "tier": 3, "damage": 3, "reach": 36.0, "cooldown": 0.9, "style": "heavy", "arc": 1.5, "windup": 0.2, "force": 2.2},
+
+	# The off hand (not in the JS original): a shield, held up with the right
+	# mouse button, blocks arrows and blows within `arc` degrees either side of
+	# where you aim, each block costing `cost` of your breath; or a quiver,
+	# `slots` more stacks of ammunition, drawn on first.
+	{"slot": "offhand", "icon": "shield", "kind": "shield", "name": "Wooden Buckler", "tier": 1, "arc": 50.0, "cost": 0.12},
+	{"slot": "offhand", "icon": "shield", "kind": "shield", "name": "Iron-rimmed Shield", "tier": 2, "arc": 65.0, "cost": 0.09},
+	{"slot": "offhand", "icon": "shield", "kind": "shield", "name": "Kite Shield", "tier": 3, "arc": 80.0, "cost": 0.07},
+	{"slot": "offhand", "icon": "quiver", "kind": "quiver", "name": "Leather Quiver", "tier": 1, "slots": 2},
+	{"slot": "offhand", "icon": "quiver", "kind": "quiver", "name": "Hunter’s Quiver", "tier": 2, "slots": 3},
+	{"slot": "offhand", "icon": "quiver", "kind": "quiver", "name": "Great Quiver", "tier": 3, "slots": 4},
 ]
 
 # Things that stack in the bag and get used up.
@@ -129,6 +141,11 @@ const STYLES := {
 static func describe(item: Dictionary) -> Array:
 	if item.has("desc"):
 		return [item.desc]
+	if item.get("kind") == "shield":
+		return ["Hold right mouse to raise", "Blocks arrows and blows within %d° of your aim" % roundi(item.arc),
+			"Each block costs %d%% of your breath" % roundi(item.cost * 100), "You move slower behind it"]
+	if item.get("kind") == "quiver":
+		return ["Holds %d more stacks of ammunition" % item.slots, "Arrows, bolts and stones: used first"]
 	if item.has("armour"):
 		return ["+%d armour" % item.armour]
 	if item.has("range"):

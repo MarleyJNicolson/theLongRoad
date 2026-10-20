@@ -15,14 +15,12 @@ const KEYS := {
 	"cart": [KEY_C],
 	"boost": [KEY_SHIFT], # gallop on the cart, sprint on foot
 	"dash": [KEY_CTRL, KEY_SPACE],
-	"swap": [KEY_Q],
+	"swap": [KEY_R], # (R also restarts, but only once the run is over)
 	"close": [KEY_ESCAPE],
 }
 const BUTTONS := {
 	"attack": [MOUSE_BUTTON_LEFT],
-	# Right-click swaps weapons too, but not over a panel (where it sells), so
-	# it's its own action
-	"swap_click": [MOUSE_BUTTON_RIGHT],
+	"block": [MOUSE_BUTTON_RIGHT], # hold to raise a shield
 }
 
 

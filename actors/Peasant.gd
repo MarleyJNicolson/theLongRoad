@@ -14,7 +14,8 @@ const RADIUS := 8.0
 
 # Equipped items drawn in the peasant's hands (Rig weapon names), by icon.
 const MELEE := {"club": "club", "sword": "sword", "spear": "spear", "axe": "axe"}
-const RANGED := {"bow": "bow", "crossbow": "crossbow", "sling": "sling"}
+const RANGED := {"bow": "bow", "crossbow": "crossbow", "sling": "sling", "shield": "shield"}
+const BLOCKING_SPEED := 0.6 # walking pace behind a raised shield
 
 var vx := 0.0
 var vy := 0.0
@@ -60,7 +61,7 @@ func play(move: String, back := false, windup := 0.0) -> void:
 func set_bow(item: Variant, loaded: bool, draw := 1.0) -> void:
 	rig.offhand = RANGED.get(item.icon) if item else null
 	rig.loaded = loaded
-	rig.aiming = rig.offhand != null
+	rig.aiming = rig.offhand != null and rig.offhand != "shield"
 	rig.pull = draw
 
 
@@ -82,7 +83,7 @@ func dashing() -> bool:
 
 
 # input: { up, down, left, right }; obstacles: Vector3(x, y, radius).
-func update(dt: float, input: Dictionary, aim: Vector2, obstacles: Array, sprinting := false) -> void:
+func update(dt: float, input: Dictionary, aim: Vector2, obstacles: Array, sprinting := false, blocking := false) -> void:
 	var mx := int(input.get("right", false)) - int(input.get("left", false))
 	var my := int(input.get("down", false)) - int(input.get("up", false))
 	var length := Vector2(mx, my).length()
@@ -91,7 +92,7 @@ func update(dt: float, input: Dictionary, aim: Vector2, obstacles: Array, sprint
 	if dash_t > 0:
 		dash_t -= dt
 	else:
-		var top := SPRINT_SPEED if sprinting else WALK_SPEED
+		var top := WALK_SPEED * BLOCKING_SPEED if blocking else (SPRINT_SPEED if sprinting else WALK_SPEED)
 		var k := 1.0 - exp(-dt * 12)
 		vx += (mx / length * top - vx) * k
 		vy += (my / length * top - vy) * k

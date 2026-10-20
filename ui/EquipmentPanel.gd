@@ -9,7 +9,7 @@ const SLOT := 52.0
 const ROWS := [
 	["", "helmet", "bag"],
 	["shoulders", "body", "cart"],
-	["", "legs", ""],
+	["offhand", "legs", ""],
 	["ranged", "swap", "melee"],
 ]
 
@@ -57,7 +57,7 @@ func _cell(cell: String) -> Control:
 			gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			return gap
 		"swap":
-			var hint := UiKit.label("⇄\nQ", 11, Color(UiKit.TEXT, 0.6), dpr)
+			var hint := UiKit.label("⇄\nR", 11, Color(UiKit.TEXT, 0.6), dpr)
 			hint.custom_minimum_size = Vector2(SLOT, SLOT) * dpr
 			hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			hint.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -100,7 +100,7 @@ func _slot_look(slot: String) -> Dictionary:
 	var worn: Variant = game.equipment[slot]
 	var shown: Variant = worn if worn else Items.BARE.get(slot)
 	var weapon := slot == "ranged" or slot == "melee"
-	var in_hand: bool = slot == game.active
+	var in_hand: bool = slot == game.active or (slot == "offhand" and game.blocking)
 	var faded := 1.0
 	if not worn:
 		faded = 0.35
@@ -113,7 +113,7 @@ func _slot_look(slot: String) -> Dictionary:
 		"edge": Items.TIER_COLOURS[shown.tier if shown else 0].edge,
 		"background": Color(60 / 255.0, 40 / 255.0, 20 / 255.0, 0.55) if weapon else Color(0, 0, 0, 0.35),
 		"faded": faded,
-		"badge": "IN HAND" if in_hand else "",
+		"badge": ("RAISED" if slot == "offhand" else "IN HAND") if in_hand else "",
 		"glow": in_hand,
 		"always_hover": true,
 	}

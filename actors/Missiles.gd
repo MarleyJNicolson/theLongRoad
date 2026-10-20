@@ -61,7 +61,11 @@ func update(dt: float, enemies: Enemies) -> Array:
 			if e.alive() and e.position.distance_to(s.pos) < (24.0 if e.in_hiding else e.radius) + HIT_RADIUS:
 				target = e
 				break
-		if target:
+		if target and target.blocks(-s.dir):
+			# Into their shield: it takes the damage, the shot drops
+			target.hit_shield(s.damage, s.dir.x, s.dir.y)
+			s.gone = not s.lobbed
+		elif target:
 			target.hit(s.dir.x, s.dir.y, s.damage)
 			if not target.alive():
 				kills.append(target)

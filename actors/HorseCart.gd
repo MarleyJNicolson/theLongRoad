@@ -145,7 +145,7 @@ func play(move: String, back := false, windup := 0.0) -> void:
 func set_bow(item: Variant, loaded: bool) -> void:
 	rig.offhand = Peasant.RANGED.get(item.icon) if item else null
 	rig.loaded = loaded
-	rig.aiming = rig.offhand != null
+	rig.aiming = rig.offhand != null and rig.offhand != "shield"
 	rig.pull = 1.0 if loaded else 0.3
 
 

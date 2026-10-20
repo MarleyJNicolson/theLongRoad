@@ -125,6 +125,7 @@ var bag: Array = []
 var cart_store: Array = []
 var bag_open := false
 var cart_open := false
+var blocking := false # holding a shield up (right mouse)
 
 
 func _ready() -> void:
@@ -323,9 +324,11 @@ func _process(delta: float) -> void:
 		trading = null
 		bag_open = false
 		cart_open = false
-	# (A right-click on a panel is for selling, not swapping weapons)
-	if Controls.pressed("swap") or (Controls.pressed("swap_click") and not pointer_over_ui):
+	if Controls.pressed("swap"):
 		swap_weapon()
+	# A shield is up while right mouse is held (not over a panel, where
+	# right-click sells), for as long as there's breath to block with
+	blocking = shield() != null and Controls.held("block") and not pointer_over_ui and not out_of_breath
 
 	_mark("input")
 	var near := road.nearest(cart.x, cart.y, road_index)
@@ -338,7 +341,7 @@ func _process(delta: float) -> void:
 	if on_foot:
 		var cart_solids := cart.bodies()
 		sprinting = _update_breath(dt, keys)
-		peasant.update(dt, keys, pointer_world(), solids.near(peasant.position, 60) + Array(cart_solids), sprinting)
+		peasant.update(dt, keys, pointer_world(), solids.near(peasant.position, 60) + Array(cart_solids), sprinting, blocking)
 		_keep_near_cart()
 		if peasant.dashing() and randf() < 0.6:
 			_puff(peasant.position)
@@ -385,9 +388,9 @@ func _process(delta: float) -> void:
 	for v in fight.volleys:
 		enemy_arrows.fire(v)
 	for b in fight.blows:
-		hurt(b.damage, b.faction, false)
+		hurt(b.damage, b.faction, false, b.from)
 	for h in enemy_arrows.update(dt, targets, solids):
-		hurt(h.damage, h.faction, true)
+		hurt(h.damage, h.faction, true, h.from)
 	for e in missiles.update(dt, enemies):
 		_on_kill(e)
 	_mark("arrows+missiles")
@@ -474,7 +477,7 @@ func search(chest: Dictionary) -> void:
 	for kind in ["arrows", "bolts"]:
 		if not found[kind]:
 			continue
-		var lost := stash(bag, kind, found[kind])
+		var lost := stash_ammo(kind, found[kind])
 		if lost:
 			parts.append("%d %s (bag full, %d left behind)" % [found[kind] - lost, kind, lost])
 		else:
@@ -510,7 +513,7 @@ func raid_barrel(barrel: Dictionary) -> void:
 		var have: int = barrel.contents[kind]
 		if not have:
 			continue
-		var left := stash(bag, kind, have)
+		var left := stash_ammo(kind, have)
 		if have - left:
 			took.append("%d %s" % [have - left, kind])
 		barrel.contents[kind] = left
@@ -523,11 +526,11 @@ func raid_barrel(barrel: Dictionary) -> void:
 
 # E at a rock or boulder: prise out what stones your bag has room for.
 func gather(rock: Dictionary) -> void:
-	var take := mini(rock.gather, room_for(bag, "stones"))
+	var take := mini(rock.gather, ammo_room("stones"))
 	if not take:
 		say("Your bag has no room for more stones")
 		return
-	stash(bag, "stones", take)
+	stash_ammo("stones", take)
 	scenery.quarry(rock, take)
 	var left := ""
 	if rock.gather:
@@ -538,7 +541,12 @@ func gather(rock: Dictionary) -> void:
 # What an entry in the bag is worth to a merchant.
 func value_of(entry: Dictionary) -> int:
 	if entry.type == "gear":
-		return Items.sell_value(entry.item)
+		# (a quiver goes with whatever's in it)
+		var worth := Items.sell_value(entry.item)
+		for e in entry.item.get("contents", []):
+			if e:
+				worth += value_of(e)
+		return worth
 	var info: Dictionary = Items.CONSUMABLES[entry.type]
 	return floori(entry.count / 10.0 * info.value) if info.has("ammo") else info.value
 
@@ -642,6 +650,9 @@ func toggle_cart() -> void:
 
 
 func container(container_name: String) -> Array:
+	if container_name == "quiver":
+		var q: Variant = quiver()
+		return q if q != null else []
 	return cart_store if container_name == "cart" else bag
 
 
@@ -671,8 +682,16 @@ func move_item(from: String, i: int, to: String, j := -1) -> void:
 		return
 	var src := container(from)
 	var dst := container(to)
+	if i >= src.size() or j >= dst.size():
+		return
 	var entry: Variant = src[i]
 	if not entry or (from == to and (j == -1 or j == i)):
+		return
+	if to == "quiver" and not Items.CONSUMABLES.get(entry.type, {}).has("ammo"):
+		say("Only arrows, bolts and stones go in the quiver")
+		return
+	if from == "quiver" and j != -1 and dst[j] and not Items.CONSUMABLES.get(dst[j].type, {}).has("ammo"):
+		say("Only arrows, bolts and stones go in the quiver")
 		return
 	if j != -1:
 		var there: Variant = dst[j]
@@ -712,7 +731,10 @@ func use_bag_item(i: int) -> void:
 		say("Equipped %s" % item.name)
 		return
 	if Items.CONSUMABLES[entry.type].has("ammo"):
-		say("Ammunition is used up as you shoot")
+		if quiver() != null:
+			move_item("bag", i, "quiver")
+		else:
+			say("Ammunition is used up as you shoot")
 		return
 	if entry.type == "poultice":
 		if health >= MAX_HEALTH:
@@ -830,7 +852,7 @@ func cannot_buy(offer: Dictionary, price: int) -> String:
 		return "Not enough gold"
 	if offer.kind == "gear" and not bag.has(null):
 		return "Bag full"
-	if offer.kind == "consumable" and room_for(bag, offer.type) < offer.get("qty", 1):
+	if offer.kind == "consumable" and (ammo_room(offer.type) if Items.CONSUMABLES[offer.type].has("ammo") else room_for(bag, offer.type)) < offer.get("qty", 1):
 		return "Bag full"
 	return ""
 
@@ -849,7 +871,10 @@ func buy(i: int) -> void:
 		say("Bought %s – it's in your bag" % offer.item.name)
 	elif offer.kind == "consumable":
 		var how_many: String = str(offer.qty) if offer.has("qty") else "a"
-		stash(bag, offer.type, offer.get("qty", 1))
+		if Items.CONSUMABLES[offer.type].has("ammo"):
+			stash_ammo(offer.type, offer.get("qty", 1))
+		else:
+			stash(bag, offer.type, offer.get("qty", 1))
 		say("Bought %s %s" % [how_many, Items.CONSUMABLES[offer.type].name])
 	elif offer.type == "repair":
 		cart_health = MAX_CART_HEALTH
@@ -862,8 +887,44 @@ func buy(i: int) -> void:
 # --- Ammunition -------------------------------------------------------------
 
 # On the cart, ammo comes from cart storage then the bag; on foot, the bag.
+# A quiver comes before either.
 func _ammo_sources() -> Array:
-	return [bag] if on_foot else [cart_store, bag]
+	var sources := [bag] if on_foot else [cart_store, bag]
+	var q: Variant = quiver()
+	if q != null:
+		sources.push_front(q)
+	return sources
+
+
+# The quiver's stacks, if one is worn (or null).
+func quiver() -> Variant:
+	var item: Variant = equipment.get("offhand")
+	if not item or item.get("kind") != "quiver":
+		return null
+	if not item.has("contents"):
+		item.contents = []
+		item.contents.resize(item.slots)
+	return item.contents
+
+
+# The shield, if one is worn (or null).
+func shield() -> Variant:
+	var item: Variant = equipment.get("offhand")
+	return item if item and item.get("kind") == "shield" else null
+
+
+# Put ammunition away: the quiver first, then the bag. Returns how many
+# didn't fit.
+func stash_ammo(type: String, count: int) -> int:
+	var q: Variant = quiver()
+	if q != null:
+		count = stash(q, type, count)
+	return stash(bag, type, count)
+
+
+func ammo_room(type: String) -> int:
+	var q: Variant = quiver()
+	return room_for(bag, type) + (room_for(q, type) if q != null else 0)
 
 
 func ammo_count(kind: String) -> int:
@@ -942,16 +1003,21 @@ func _update_held_weapon(_dt: float) -> void:
 	var draw := clampf(1 - throw_cooldown / ranged().cooldown, 0, 1)
 	var ranged_in_hand: Variant = equipment.ranged if active == "ranged" else null
 	var melee_in_hand: Variant = equipment.melee if active == "melee" else null
+	# The left hand: a shield when it's raised, or held beside a melee weapon;
+	# otherwise whatever ranged weapon is in hand
+	var left: Variant = ranged_in_hand
+	if shield() and (blocking or active == "melee"):
+		left = shield()
 	peasant.set_weapon(melee_in_hand)
 	cart.set_weapon(melee_in_hand)
-	peasant.set_bow(ranged_in_hand, stocked, draw)
-	cart.set_bow(ranged_in_hand, stocked and draw >= 1)
+	peasant.set_bow(left, stocked, draw)
+	cart.set_bow(left, stocked and draw >= 1)
 	if not on_foot:
 		var at := pointer_world()
 		cart.aim = atan2(at.y - cart.cart_y, at.x - cart.cart_x) - cart.cart_heading
 
 
-# Q: put away one weapon and take out the other.
+# R: put away one weapon and take out the other.
 func swap_weapon() -> void:
 	active = "melee" if active == "ranged" else "ranged"
 	say("%s in hand" % (ranged() if active == "ranged" else melee()).name)
@@ -969,7 +1035,7 @@ func _update_throwing(dt: float, from: Dictionary) -> void:
 	var target := pointer_world()
 	var loaded := ammo_count(weapon.ammo) > 0
 	var in_hand := active == "ranged"
-	var down := Controls.held("attack") and not pointer_over_ui
+	var down := Controls.held("attack") and not pointer_over_ui and not blocking
 	if in_hand and down and not loaded and time - out_of_ammo_at > 2:
 		out_of_ammo_at = time
 		say("Out of %s%s!" % [Items.AMMO[weapon.ammo].name.to_lower(), " in your bag" if on_foot else ""])
@@ -1016,7 +1082,7 @@ func _update_melee(dt: float, from: Dictionary) -> void:
 	melee_cooldown -= dt
 	var weapon := melee()
 	var holder: Variant = peasant if on_foot else cart
-	if active == "melee" and Controls.held("attack") and not pointer_over_ui and melee_cooldown <= 0:
+	if active == "melee" and Controls.held("attack") and not pointer_over_ui and not blocking and melee_cooldown <= 0:
 		melee_cooldown = weapon.cooldown
 		var at := pointer_world()
 		var blow := {"facing": atan2(at.y - from.y, at.x - from.x), "reach": weapon.reach, "arc": weapon.arc, "damage": weapon.damage}
@@ -1085,6 +1151,10 @@ func _strike(from: Dictionary, s: Dictionary) -> void:
 	var hit: Array = targets.slice(0, s.pierce) if s.has("pierce") else targets
 	for t in hit:
 		var d: float = t.dist if t.dist else 1.0
+		# A shield facing you takes it (an axe's heavy blow twice over)
+		if t.e.blocks(Vector2(-t.dx, -t.dy)):
+			t.e.hit_shield(s.damage * (2 if s.fx == "heavy" else 1), t.dx / d, t.dy / d)
+			continue
 		t.e.hit(t.dx / d, t.dy / d, s.damage, s.get("force", 1.0))
 		if not t.e.alive():
 			_on_kill(t.e)
@@ -1184,11 +1254,20 @@ func _update_attacks(dt: float) -> void:
 
 
 # A blow or an arrow lands: on foot it's you, on the cart it's the cart.
-func hurt(dmg: int, faction: String, arrow: bool) -> void:
+func hurt(dmg: int, faction: String, arrow: bool, from := Vector2.INF) -> void:
 	if invulnerable > 0 or state == "over":
 		return
 	if on_foot and dash_guard > 0:
 		return # dashed clear of it
+	# A raised shield turns aside what comes from where you're facing, for a
+	# little breath (on the cart too: the driver shields the cart)
+	if blocking and from != Vector2.INF and _shield_covers(from):
+		breath = maxf(0.0, breath - shield().cost)
+		breath_rest = 0.0
+		if breath <= 0:
+			out_of_breath = true
+		block_flash = 0.25
+		return
 	# Armour only protects the peasant, not the cart.
 	if on_foot and randf() < Items.block_chance(equipment):
 		block_flash = 0.25
@@ -1213,6 +1292,16 @@ func hurt(dmg: int, faction: String, arrow: bool) -> void:
 				end("Cart torn apart", "the goblins hacked your cart to kindling")
 			else:
 				end("Cart smashed", "the bandits smashed your cart and took the horse")
+
+
+# Is `from` within the raised shield's arc (round where you're aiming)?
+func _shield_covers(from: Vector2) -> bool:
+	var me := Vector2(player().x, player().y)
+	var aim := pointer_world() - me
+	var toward := from - me
+	if aim == Vector2.ZERO or toward == Vector2.ZERO:
+		return true
+	return absf(aim.angle_to(toward)) < deg_to_rad(shield().arc)
 
 
 # The run is over. (Signing the scoreboard comes with the game-over screen.)
@@ -1299,7 +1388,7 @@ func _update_breath(dt: float, keys: Dictionary) -> bool:
 	dash_guard -= dt
 	var moving: bool = keys.up or keys.down or keys.left or keys.right
 	var spent := false
-	if on_foot and Controls.pressed("dash") and dash_cooldown <= 0 and not peasant.dashing():
+	if on_foot and not blocking and Controls.pressed("dash") and dash_cooldown <= 0 and not peasant.dashing():
 		if breath >= DASH_COST:
 			# Along the keys held, or towards the mouse if standing still
 			var toward := pointer_world() - peasant.position
@@ -1314,7 +1403,7 @@ func _update_breath(dt: float, keys: Dictionary) -> bool:
 				_puff(peasant.position)
 		else:
 			say("Too out of breath to dash")
-	var sprint: bool = on_foot and Controls.held("boost") and moving and not out_of_breath and breath > 0
+	var sprint: bool = on_foot and not blocking and Controls.held("boost") and moving and not out_of_breath and breath > 0
 	if sprint:
 		breath = maxf(0.0, breath - SPRINT_DRAIN * dt)
 		spent = true
@@ -1323,7 +1412,8 @@ func _update_breath(dt: float, keys: Dictionary) -> bool:
 		if breath <= 0:
 			out_of_breath = true
 	else:
-		breath_rest += dt
+		if not blocking: # (no getting your breath back behind a raised shield)
+			breath_rest += dt
 		if breath_rest > BREATH_REGEN_DELAY:
 			breath = minf(1.0, breath + BREATH_REGEN * dt)
 		if out_of_breath and breath >= 0.33:
@@ -1522,6 +1612,8 @@ func debug_key(event: InputEvent) -> void:
 		debug_spawn()
 	elif event.keycode == KEY_F5:
 		debug_wave(300)
+	elif event.keycode == KEY_F6:
+		_debug_cycle("offhand", ["Wooden Buckler", "Iron-rimmed Shield", "Kite Shield", "Leather Quiver", "Hunter’s Quiver", "Great Quiver"])
 
 
 # Debug, until chests and traders exist: F2 / F3 cycle the ranged / melee
@@ -1530,6 +1622,9 @@ func _debug_cycle(slot: String, names: Array) -> void:
 	var now: Variant = equipment[slot]
 	var i: int = names.find(now.name) if now else -1
 	equipment[slot] = Items.named(names[i + 1]) if i + 1 < names.size() else null
+	if slot == "offhand":
+		say("%s in your off hand" % (equipment.offhand.name if equipment.offhand else "Nothing"))
+		return
 	active = slot
 	var item := ranged() if slot == "ranged" else melee()
 	if slot == "ranged" and ammo_count(item.ammo) < 10:

@@ -9,7 +9,9 @@ extends PanelContainer
 const SLOT := 52.0
 
 var game: Game
-var container_name: String # "bag" or "cart"
+var container_name: String # "bag", "cart" or "quiver"
+var above: Control # the quiver sits above the bag
+var _slots: Array = []
 var dpr: float
 var tip: UiKit.Tip
 var _purse: Label
@@ -21,6 +23,7 @@ func _init(game_: Game, container_name_: String, dpr_: float) -> void:
 	container_name = container_name_
 	dpr = dpr_
 	var is_cart := container_name == "cart"
+	var is_quiver := container_name == "quiver"
 	visible = false
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	add_theme_stylebox_override("panel", UiKit.panel_style(
@@ -32,7 +35,7 @@ func _init(game_: Game, container_name_: String, dpr_: float) -> void:
 	var head := HBoxContainer.new()
 	head.add_theme_constant_override("separation", roundi(12 * dpr))
 	column.add_child(head)
-	head.add_child(UiKit.label("CART STORAGE" if is_cart else "BAG", 11, UiKit.TEXT, dpr))
+	head.add_child(UiKit.label("CART STORAGE" if is_cart else ("QUIVER" if is_quiver else "BAG"), 11, UiKit.TEXT, dpr))
 	_purse = UiKit.label("", 14, UiKit.GOLD, dpr)
 	_purse.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_purse.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -48,9 +51,13 @@ func _init(game_: Game, container_name_: String, dpr_: float) -> void:
 	grid.add_theme_constant_override("h_separation", roundi(6 * dpr))
 	grid.add_theme_constant_override("v_separation", roundi(6 * dpr))
 	column.add_child(grid)
-	var count := Items.CART_SIZE if is_cart else Items.BAG_SIZE
+	var count := Items.CART_SIZE if is_cart else (4 if is_quiver else Items.BAG_SIZE)
+	if is_quiver:
+		grid.columns = 4
 	for i in count:
-		grid.add_child(_slot(i))
+		var slot := _slot(i)
+		_slots.append(slot)
+		grid.add_child(slot)
 
 	# Wraps to the grid's width, as the CSS did
 	_hint = UiKit.label("", 10, Color(UiKit.TEXT, 0.6), dpr)
@@ -63,7 +70,8 @@ func _init(game_: Game, container_name_: String, dpr_: float) -> void:
 
 func _slot(i: int) -> ItemSlot:
 	var look := func() -> Dictionary:
-		var entry: Variant = game.container(container_name)[i]
+		var list := game.container(container_name)
+		var entry: Variant = list[i] if i < list.size() else null
 		if not entry:
 			return {"item": null}
 		var item := Game.entry_item(entry)
@@ -71,20 +79,25 @@ func _slot(i: int) -> ItemSlot:
 	var slot := ItemSlot.new(SLOT, dpr, look)
 	slot.clicked.connect(func(shift: bool) -> void: _click(i, shift))
 	slot.right_clicked.connect(func() -> void:
-		if game.container(container_name)[i]:
+		if _entry(i):
 			game.sell_bag_item(i, container_name))
 	slot.hovered.connect(func(on: bool) -> void: _hover(i if on else -1))
 	slot.drag_data = func() -> Variant:
-		return {"from": container_name, "i": i} if game.container(container_name)[i] else null
+		return {"from": container_name, "i": i} if _entry(i) else null
 	slot.on_drop = func(data: Dictionary) -> void: game.move_item(data.from, data.i, container_name, i)
 	return slot
 
 
+func _entry(i: int) -> Variant:
+	var list := game.container(container_name)
+	return list[i] if i < list.size() else null
+
+
 func _click(i: int, shift: bool) -> void:
-	if not game.container(container_name)[i]:
+	if not _entry(i):
 		return
-	if container_name == "cart":
-		game.move_item("cart", i, "bag")
+	if container_name == "cart" or container_name == "quiver":
+		game.move_item(container_name, i, "bag")
 	elif shift and game.cart_open:
 		game.move_item("bag", i, "cart")
 	else:
@@ -92,7 +105,7 @@ func _click(i: int, shift: bool) -> void:
 
 
 func _hover(i: int) -> void:
-	var entry: Variant = game.container(container_name)[i] if i >= 0 else null
+	var entry: Variant = _entry(i) if i >= 0 else null
 	if not entry:
 		tip.hide_tip()
 		return
@@ -103,9 +116,11 @@ func _hover(i: int) -> void:
 	if gear:
 		var worn: Variant = game.equipment[item.slot]
 		lines.append("Wearing: %s" % worn.name if worn else "%s slot is empty" % Items.SLOT_NAMES[item.slot])
-	if container_name == "cart":
+	if container_name == "cart" or container_name == "quiver":
 		lines.append("Click to take it into your bag")
 	else:
+		if Items.CONSUMABLES.get(entry.type, {}).has("ammo") and game.quiver() != null:
+			lines.append("Click to put it in your quiver")
 		if gear:
 			lines.append("Click to equip")
 		if game.cart_open:
@@ -117,18 +132,28 @@ func _hover(i: int) -> void:
 # Keep it up to date: shown while open (and not after the run ends).
 func refresh() -> void:
 	var open := game.cart_open if container_name == "cart" else game.bag_open
+	if container_name == "quiver":
+		open = game.bag_open and game.quiver() != null
 	visible = open and game.state != "over"
 	if not visible:
 		tip.hide_tip()
 		return
-	_purse.text = "" if container_name == "cart" else "● %d gold" % game.gold
-	if container_name == "cart":
+	_purse.text = "● %d gold" % game.gold if container_name == "bag" else ""
+	if container_name == "quiver":
+		var count: int = game.quiver().size()
+		for k in _slots.size():
+			_slots[k].visible = k < count
+		_hint.text = "Ammunition only · Click to take out"
+	elif container_name == "cart":
 		_hint.text = "Click to take · Drag to move · Right-click to sell"
 	elif game.cart_open:
 		_hint.text = "Click to use · Shift-click or drag to the cart"
 	else:
 		_hint.text = "Click to use or equip · Right-click to sell"
-	# Above the equipment, the cart's beside the bag
+	# Above the equipment, the cart's beside the bag, the quiver above it
 	reset_size()
 	var screen := get_viewport_rect().size
-	position = Vector2((228 if container_name == "cart" else 16) * dpr, screen.y - 300 * dpr - size.y)
+	if container_name == "quiver" and above:
+		position = Vector2(16 * dpr, above.position.y - size.y - 8 * dpr)
+	else:
+		position = Vector2((228 if container_name == "cart" else 16) * dpr, screen.y - 300 * dpr - size.y)
