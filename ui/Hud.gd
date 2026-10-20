@@ -180,7 +180,17 @@ func _build() -> void:
 	s = _stat("Day", 150)
 	_day_small = s[1]
 	_day = s[2]
-	stats.add_child(s[0])
+	# The sun-and-moon disc beside it
+	var clock_row := HBoxContainer.new()
+	clock_row.add_theme_constant_override("separation", roundi(10 * dpr))
+	var box: PanelContainer = s[0]
+	box.remove_child(s[3])
+	box.add_child(clock_row)
+	var dial := Drawn.new(Vector2(40, 40) * dpr, _draw_dial)
+	dial.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	clock_row.add_child(dial)
+	clock_row.add_child(s[3])
+	stats.add_child(box)
 	_dev = _label("", 12, Color("#ffb3a8"))
 	_dev.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_add(_dev)
@@ -519,6 +529,46 @@ func _draw_hearts(c: Control) -> void:
 		c.draw_circle(o + Vector2(-r, -r * 0.4), r, colour)
 		c.draw_circle(o + Vector2(r, -r * 0.4), r, colour)
 		c.draw_colored_polygon(PackedVector2Array([o + Vector2(-r * 1.95, -r * 0.1), o + Vector2(r * 1.95, -r * 0.1), o + Vector2(0, r * 2.0)]), colour)
+
+
+# The time of day as a disc that turns through the day: the sky's colour all
+# round it (day, dusk, night, dawn), the sun in the middle of the day and the
+# moon in the middle of the night, now at the marker on top.
+func _draw_dial(c: Control) -> void:
+	var r := minf(c.size.x, c.size.y) / 2 - 1 * dpr
+	var o := c.size / 2
+	var now := fposmod(game.clock, DayNight.CYCLE)
+	# Where the wheel puts time t: now straight up, later times to the left
+	# (it turns clockwise, bringing them up)
+	var at := func(t: float, radius: float) -> Vector2:
+		return o + Vector2.from_angle(-PI / 2 + (t - now) / DayNight.CYCLE * TAU) * radius
+	c.draw_circle(o, r + 1 * dpr, Color("#5e4a33"))
+	var steps := 72
+	for k in steps:
+		var t0 := float(k) / steps * DayNight.CYCLE
+		var t1 := float(k + 1) / steps * DayNight.CYCLE
+		var dark := DayNight.darkness((t0 + t1) / 2)
+		var sky := Color("#7ec0e8").lerp(Color("#1d2448"), dark).lerp(Color("#f0a050"), sin(dark * PI) * 0.7)
+		c.draw_colored_polygon(PackedVector2Array([o, at.call(t0, r), at.call(t1 + 0.5, r)]), sky)
+	# Stars across the night
+	for t in [510.0, 545.0, 600.0, 640.0, 665.0, 560.0]:
+		c.draw_circle(at.call(t, r * (0.82 if int(t) % 2 else 0.4)), 0.8 * dpr, Color("#fff4d6", 0.85))
+	# The sun, mid-morning to mid-afternoon
+	var sun: Vector2 = at.call((DayNight.DAY - DayNight.DUSK) / 2, r * 0.58)
+	for k in 8:
+		var a := k * TAU / 8
+		c.draw_line(sun + Vector2.from_angle(a) * r * 0.24, sun + Vector2.from_angle(a) * r * 0.36, Color("#ffd75e"), maxf(1, 1.2 * dpr))
+	c.draw_circle(sun, r * 0.2, Color("#ffd75e"))
+	c.draw_circle(sun - Vector2(1, 1) * r * 0.05, r * 0.12, Color("#fff1a8"))
+	# The moon, a crescent, in the dead of night
+	var moon: Vector2 = at.call(DayNight.DAY + (DayNight.NIGHT - DayNight.DAWN) / 2, r * 0.58)
+	c.draw_circle(moon, r * 0.19, Color("#e8e0c8"))
+	c.draw_circle(moon + Vector2(r * 0.09, -r * 0.05), r * 0.16, Color("#1d2448"))
+	# The rim and the marker for now
+	c.draw_arc(o, r, 0, TAU, 48, Color("#2a1f14"), maxf(1, 1.5 * dpr), true)
+	var tip := o + Vector2(0, -r + 5 * dpr)
+	c.draw_colored_polygon(PackedVector2Array([tip, tip + Vector2(-4, -7) * dpr, tip + Vector2(4, -7) * dpr]), UiKit.GILT)
+	c.draw_polyline(PackedVector2Array([tip, tip + Vector2(-4, -7) * dpr, tip + Vector2(4, -7) * dpr, tip]), INK, maxf(1, dpr))
 
 
 func _draw_coin(c: Control) -> void:
