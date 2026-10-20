@@ -87,7 +87,7 @@ func _status_text() -> String:
 		lines.append("WASD walk · Shift sprint · Ctrl/Space dash · E climb on (at the cart) · click attack · Q swap")
 	else:
 		lines.append("W/S drive · A/D steer · Shift gallop · E get down · click attack · Q swap")
-	lines.append("Debug: F2 ranged weapon · F3 melee weapon · F4 raiders · 1-4 zoom · F1 filter")
+	lines.append("Debug: F2 ranged weapon · F3 melee weapon · F4 raiders · F5 huge wave · 1-4 zoom · F1 filter")
 	if g.interaction and g.interaction.label:
 		lines.append(g.interaction.label)
 	if g.toast:

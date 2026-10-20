@@ -1520,6 +1520,8 @@ func debug_key(event: InputEvent) -> void:
 		_debug_cycle("melee", ["Cudgel", "Short Sword", "Boar Spear", "Bearded Axe"])
 	elif event.keycode == KEY_F4:
 		debug_spawn()
+	elif event.keycode == KEY_F5:
+		debug_wave(300)
 
 
 # Debug, until chests and traders exist: F2 / F3 cycle the ranged / melee
@@ -1534,6 +1536,24 @@ func _debug_cycle(slot: String, names: Array) -> void:
 		stash(cart_store, item.ammo, 30)
 		stash(bag, item.ammo, 30)
 	say("%s in hand" % item.name)
+
+
+# Debug: F5 sends a huge wave at you from all sides, to feel the scale: the
+# region's raiders, with archers and heavies among them.
+func debug_wave(count: int) -> void:
+	var me := player()
+	var biome: Dictionary = Threat.stage_at(metres).biome
+	var goblins: bool = biome.name == "The Darkwood" or (biome.name != "The Barrens" and randf() < 0.5)
+	var types := ["goblin", "goblin", "goblin", "goblinArcher", "orc"] if goblins else ["bandit", "bandit", "bandit", "archer", "brute"]
+	enemies.threat = Threat.threat_at(metres)
+	for k in count:
+		var a := randf() * TAU
+		var at := Vector2(me.x, me.y) + Vector2(cos(a), sin(a)) * randf_range(500, 900)
+		var home := {"x": at.x, "y": at.y}
+		var e := enemies.add(types[k % types.size()], at.x, at.y, home)
+		e.leash = 4000.0
+		e.engage()
+	say("Debug: a wave of %d %s" % [count, "goblins" if goblins else "bandits"])
 
 
 # Debug: F4 sends a mixed band of raiders at you from up ahead.
