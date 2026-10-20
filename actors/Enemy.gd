@@ -111,6 +111,9 @@ var slide_side := 0
 var held := 0.0 # time waiting for its next update (see Enemies.update)
 var shield_hp := 0 # what's left of a shield (0: none)
 var rooted := false # standing their ground (a hornblower winding up to blow)
+var steady := 0.0 # seconds left keeping their facing while shoved back by a blow
+var stagger := 0.0 # seconds left slowed by a shot on their shield
+const STAGGER_SLOW := 0.6
 var block_flash := 0.0
 
 var rig: Rig
@@ -221,6 +224,8 @@ func update(dt: float, target: Dictionary, relentless: bool, victims: Array = []
 	attack_cooldown -= dt
 	flash -= dt
 	block_flash -= dt
+	steady -= dt
+	stagger -= dt
 	alert -= dt
 	# Aim a little ahead of the target so chasers try to cut it off.
 	var tx: float = target.x + target.vx * 0.4
@@ -430,7 +435,7 @@ func seek(dt: float, tx: float, ty: float, top: float, arrive := false, keep_fac
 	var dist := d.length()
 	if dist == 0.0:
 		dist = 1.0
-	var want := 0.0 if arrive and dist < 6 else top
+	var want := 0.0 if arrive and dist < 6 else top * (STAGGER_SLOW if stagger > 0 else 1.0)
 	var k := 1.0 - exp(-dt * 5)
 	vx += (d.x / dist * want - vx) * k
 	vy += (d.y / dist * want - vy) * k
@@ -438,7 +443,8 @@ func seek(dt: float, tx: float, ty: float, top: float, arrive := false, keep_fac
 		vx = 0.0
 		vy = 0.0
 	position += Vector2(vx, vy) * dt
-	if not keep_facing:
+	# (Shoved back by a blow, they keep facing the way they were)
+	if not keep_facing and steady <= 0:
 		var moving := Vector2(vx, vy).length()
 		if moving > 8:
 			facing = atan2(vy, vx)
@@ -488,6 +494,7 @@ func blocks(toward: Vector2) -> bool:
 func deflect() -> void:
 	provoked = true
 	block_flash = 0.15
+	stagger = 0.35 # it checks them for a moment
 
 
 # The shield takes the blow. Returns true if that broke it (it's gone, and
@@ -498,6 +505,7 @@ func hit_shield(amount: int, dir_x: float, dir_y: float) -> bool:
 	block_flash = 0.15
 	vx = dir_x * 60
 	vy = dir_y * 60
+	steady = 0.35
 	if shield_hp > 0:
 		return false
 	shield_hp = 0
@@ -531,3 +539,4 @@ func hit(dir_x: float, dir_y: float, dmg := 1, force := 1.0) -> void:
 	var shove := (90.0 if heavy else 260.0) * force
 	vx = dir_x * shove
 	vy = dir_y * shove
+	steady = 0.3
