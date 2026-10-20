@@ -61,6 +61,12 @@ func _init(layer_: Node2D, upright_: Node2D, road_: Road, enemies_: Enemies) -> 
 	enemies = enemies_
 
 
+# Jump ahead to road point `i` (the debug skip to the next town): nothing is
+# placed on the stretch passed over.
+func skip_to(i: int) -> void:
+	next_index = maxi(next_index, i)
+
+
 # Towns on the road so far: { name, safe: Vector3(x, y, radius) }.
 func towns() -> Array:
 	var out := []

@@ -131,6 +131,19 @@ func _init(layer: Node2D, x_: float, y_: float, heading_: float) -> void:
 	render()
 
 
+# Put the horse down at (x, y) facing `heading_`, the cart hitched behind,
+# standing still.
+func place_at(x_: float, y_: float, heading_: float) -> void:
+	x = x_
+	y = y_
+	heading = heading_
+	cart_heading = heading_
+	cart_x = x - cos(heading) * (HITCH_LENGTH + 20)
+	cart_y = y - sin(heading) * (HITCH_LENGTH + 20)
+	speed = 0.0
+	render()
+
+
 # A companion climbs aboard, onto their seat.
 func add_rider(rider: Node2D) -> void:
 	riders.append(rider)

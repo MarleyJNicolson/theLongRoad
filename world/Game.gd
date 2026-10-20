@@ -127,6 +127,14 @@ var bag_open := false
 var cart_open := false
 var blocking := false # holding a shield up (right mouse)
 var companions: Array = [] # who rides along to defend the cart (see Companion)
+# Dev mode (F10): ammunition is never used up, and the debug keys are listed
+var dev_mode := false
+# The scoreboard: the run waiting to be signed (null once it's on the board),
+# and what the game-over screen shows: { naming } or { rank, score, top }
+var unsaved: Variant = null
+var scoreboard: Dictionary = {}
+var last_name := Scoreboard.last_name()
+var typing := false # the name box has the keyboard (set by the HUD)
 var _dressed_as: Array = [] # the armour the peasant was last drawn in
 
 
@@ -146,6 +154,10 @@ func _ready() -> void:
 
 
 func reset() -> void:
+	# Restarting without signing still puts the run on the board
+	if unsaved != null:
+		save_run(last_name)
+	scoreboard = {}
 	_read_debug_args()
 	if encounters:
 		encounters.dispose()
@@ -280,8 +292,9 @@ func _layer(layer_name: String) -> Node2D:
 func _process(delta: float) -> void:
 	var dt := minf(delta, 0.05)
 	if state == "over":
-		# (Just pressed, not held: a quick tap between frames must count)
-		if Controls.pressed("restart"):
+		# (Just pressed, not held: a quick tap between frames must count; not
+		# while typing your name, where Space is a space)
+		if Controls.pressed("restart") and not typing:
 			reset()
 		return
 	time += dt
@@ -938,6 +951,11 @@ func ammo_room(type: String) -> int:
 	return room_for(bag, type) + (room_for(q, type) if q != null else 0)
 
 
+# Is there a shot to loose? (Always, in dev mode.)
+func has_ammo(kind: String) -> bool:
+	return dev_mode or ammo_count(kind) > 0
+
+
 func ammo_count(kind: String) -> int:
 	var n := 0
 	for list in _ammo_sources():
@@ -949,6 +967,8 @@ func ammo_count(kind: String) -> int:
 
 # Spend one round from the first stack found. False if there's none.
 func _take_ammo(kind: String) -> bool:
+	if dev_mode:
+		return true
 	for list in _ammo_sources():
 		for k in range(list.size() - 1, -1, -1):
 			var e: Variant = list[k]
@@ -1016,7 +1036,7 @@ func _update_held_weapon(_dt: float) -> void:
 		var look := Peasant.dressed(equipment)
 		peasant.rig.restyle(look)
 		cart.rig.restyle(look)
-	var stocked := ammo_count(ranged().ammo) > 0
+	var stocked := has_ammo(ranged().ammo)
 	# The next shot is drawn back as the weapon reloads: full draw = ready
 	var draw := clampf(1 - throw_cooldown / ranged().cooldown, 0, 1)
 	var ranged_in_hand: Variant = equipment.ranged if active == "ranged" else null
@@ -1051,7 +1071,7 @@ func _update_throwing(dt: float, from: Dictionary) -> void:
 	throw_cooldown -= dt
 	var weapon := ranged()
 	var target := pointer_world()
-	var loaded := ammo_count(weapon.ammo) > 0
+	var loaded := has_ammo(weapon.ammo)
 	var in_hand := active == "ranged"
 	var down := Controls.held("attack") and not pointer_over_ui and not blocking
 	if in_hand and down and not loaded and time - out_of_ammo_at > 2:
@@ -1329,10 +1349,29 @@ func end(title: String, text: String) -> void:
 	state = "over"
 	cart.speed = 0.0
 	over_reason = {"title": title, "text": text}
+	# Held until you sign your name to it (see save_run)
+	unsaved = {"distance": floori(best / PX_PER_METRE), "kills": kills, "gold": gold,
+		"region": "%s (stage %d)" % [stage.name, stage.number], "fate": title}
+	scoreboard = {"naming": true}
 	_aim_state = {}
 	aim_line.queue_redraw()
 	interaction = null
 	marker.queue_redraw()
+
+
+# Put the finished run on the scoreboard under `name` and show where it placed.
+func save_run(name: String) -> void:
+	if unsaved == null:
+		return
+	var run: Dictionary = unsaved
+	unsaved = null
+	name = name.strip_edges()
+	if name != "":
+		last_name = name
+		Scoreboard.remember_name(name)
+	run.name = name
+	var placed := Scoreboard.add(run)
+	scoreboard = {"rank": placed.rank, "score": placed.entry.score, "top": placed.top}
 
 
 # --- On foot ----------------------------------------------------------------
@@ -1655,6 +1694,11 @@ func debug_key(event: InputEvent) -> void:
 		debug_spawn()
 	elif event.keycode == KEY_F5:
 		debug_wave(300)
+	elif event.keycode == KEY_F9:
+		debug_next_town()
+	elif event.keycode == KEY_F10:
+		dev_mode = not dev_mode
+		say("Dev mode on: ammunition is never used up" if dev_mode else "Dev mode off")
 	elif event.keycode == KEY_F7:
 		hire({"kind": "archer", "who": Companion.NAMES[randi() % Companion.NAMES.size()], "price": 0, "figure": Node2D.new(), "hired": false})
 	elif event.keycode == KEY_F8:
@@ -1682,6 +1726,35 @@ func _debug_cycle(slot: String, names: Array) -> void:
 
 # Debug: F5 sends a huge wave at you from all sides, to feel the scale: the
 # region's raiders, with archers and heavies among them.
+# F9: skip ahead to just outside the next town's gate, cart, companions, gear
+# and all (on foot, you're put back on the cart). The road between is passed
+# over: nothing is placed on it.
+func debug_next_town() -> void:
+	if state == "over":
+		return
+	var town_px := Towns.next_along(Road.along(road_index) + Towns.CLEAR)
+	var town_i := roundi((town_px - Road.start_along) / Road.SEGMENT)
+	var i := town_i - ceili((Towns.RADIUS + 160) / Road.SEGMENT)
+	if i <= road_index:
+		return
+	road.ensure_ahead(town_i + 40)
+	encounters.skip_to(i)
+	scenery.placed_up_to = maxi(scenery.placed_up_to, i - 60)
+	if on_foot:
+		mount()
+	var p: Vector2 = road.points[i]
+	cart.place_at(p.x, p.y, road.direction(i).angle())
+	road_index = i
+	best = maxf(best, Road.along(i))
+	metres = floori(best / PX_PER_METRE)
+	cam = p
+	trading = null
+	encounters.place()
+	scenery.update(i)
+	road.cull(i)
+	say("You press on to %s" % Towns.town_name(town_px))
+
+
 # F8: put on the next tier of every piece of armour (then none again).
 func _debug_dress() -> void:
 	var tier: int = equipment.body.tier + 1 if equipment.body else 1
