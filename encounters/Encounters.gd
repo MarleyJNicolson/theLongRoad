@@ -105,6 +105,17 @@ func traders() -> Array:
 	return out
 
 
+# Guards on duty (crossbowmen who shoot raiders that come near): towns', and
+# villages' that aren't overrun.
+func guards() -> Array:
+	var out := []
+	for e in list:
+		for g in e.get("guards", []):
+			if is_instance_valid(g) and g.visible:
+				out.append(g)
+	return out
+
+
 # Folk in towns who'd come along with you, not yet taken on.
 func hirelings() -> Array:
 	var out := []

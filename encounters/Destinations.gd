@@ -111,6 +111,17 @@ static func _burning(b: Build, spots: Array) -> Dictionary:
 
 # --- Traders ---------------------------------------------------------------
 
+# A crossbowman of the garrison standing guard at `at`, facing `facing`
+# (a trader's guard, a gate guard, a tower's). Add it to the encounter's
+# "guards" so it shoots.
+static func guard(b: Build, at: Vector2, facing: float) -> Companion:
+	var g := Companion.new("crossbowman", "Guard", false)
+	g.set_meta("post", facing)
+	b.stand(g, at.x, at.y)
+	g.rig.update(0, facing, 0)
+	return g
+
+
 static func _make_trader(b: Build, at: Vector2, facing: float, trader_name: String, stock: Array, role: String) -> Dictionary:
 	var figure := Folk.new(Folk.look(role), at.x, at.y, facing)
 	b.stand(figure, at.x, at.y)
@@ -171,6 +182,11 @@ static func _village(b: Build, c: Vector2, entrance: float, metres: float, raid:
 		b.stand(Structures.stall(a + PI, stalls[k][2]), at.x, at.y)
 		solids.append(Vector3(at.x, at.y, 14))
 		traders.append(_make_trader(b, c + Vector2(cos(a), sin(a)) * 70, a + PI, stalls[k][0], stalls[k][1], stalls[k][3]))
+	# Each stall has its guard
+	var guards := []
+	for t in traders:
+		var to_trader := Vector2(t.x, t.y) - c
+		guards.append(guard(b, Vector2(t.x, t.y) + to_trader.normalized().orthogonal() * 26 + to_trader.normalized() * 8, to_trader.angle()))
 
 	# Villagers about the square
 	var villagers := []
@@ -190,6 +206,8 @@ static func _village(b: Build, c: Vector2, entrance: float, metres: float, raid:
 			t.figure.visible = peaceful
 		for v in villagers:
 			v.visible = peaceful
+		for g in guards:
+			g.visible = peaceful
 	# Once freed, they come out cheering
 	var state := {"cheering": false, "until": -1.0}
 	var cheer := func() -> void:
@@ -216,7 +234,7 @@ static func _village(b: Build, c: Vector2, entrance: float, metres: float, raid:
 	var douse := func() -> void:
 		if fire:
 			fire.douse.call()
-	return {"name": village_name, "solids": solids, "traders": traders, "cheer": cheer, "animate": animate, "douse": douse}
+	return {"name": village_name, "solids": solids, "traders": traders, "guards": guards, "cheer": cheer, "animate": animate, "douse": douse}
 
 
 static func _friendly_village(b: Build, c: Vector2, entrance: float, metres: float) -> Dictionary:
@@ -227,6 +245,7 @@ static func _friendly_village(b: Build, c: Vector2, entrance: float, metres: flo
 		"members": [],
 		"solids": v.solids,
 		"traders": v.traders,
+		"guards": v.guards,
 		"loot": [],
 		"animate": v.animate,
 	}
@@ -257,6 +276,7 @@ static func _raided_village(b: Build, c: Vector2, entrance: float, metres: float
 		"members": members,
 		"solids": v.solids,
 		"traders": v.traders,
+		"guards": v.guards,
 		"loot": loot,
 		"trigger_radius": 380.0,
 		"reward": {"gold": 15 + floori(km * 2), "x": c.x, "y": c.y, "message": "The people of %s reward you" % v.name},

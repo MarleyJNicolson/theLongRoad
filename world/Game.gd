@@ -410,6 +410,9 @@ func _process(delta: float) -> void:
 		hurt(h.damage, h.faction, true, h.from)
 	for c in companions:
 		c.update(dt, cart.cart_heading, enemies, missiles)
+	# The garrisons' crossbowmen, at their posts
+	for guard in encounters.guards():
+		guard.update(dt, guard.get_meta("post"), enemies, missiles)
 	for e in missiles.update(dt, enemies):
 		_on_kill(e)
 	_mark("arrows+missiles")
@@ -620,7 +623,7 @@ func _update_sky(dt: float) -> void:
 	Glow.shine(get_tree(), dark)
 	var night := DayNight.is_night(clock)
 	if night and not was_night:
-		banner = {"title": "Nightfall", "sub": "War bands roam the dark · make for a town", "t": STAGE_BANNER_TIME}
+		banner = {"title": "Nightfall", "sub": "War bands roam the dark · make for a garrison", "t": STAGE_BANNER_TIME}
 	elif was_night and not night:
 		banner = {"title": "Dawn", "sub": "Day %d" % day(), "t": STAGE_BANNER_TIME}
 	was_night = night

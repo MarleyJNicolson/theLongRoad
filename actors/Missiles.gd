@@ -38,10 +38,11 @@ func throw(from: Vector2, to: Vector2, carry: Vector2, weapon: Dictionary) -> vo
 	var lobbed: bool = weapon.shot == "stone"
 	var vel: Vector2 = d / length * weapon.speed + (carry if lobbed else Vector2.ZERO)
 	list.append({"lobbed": lobbed, "shot": weapon.shot, "damage": weapon.damage, "pos": from, "vel": vel,
-		"dir": vel.normalized(), "t": 0.0, "duration": dist / weapon.speed, "height": 0.0, "landed": 0.0, "gone": false})
+		"dir": vel.normalized(), "t": 0.0, "duration": dist / weapon.speed, "height": 0.0, "landed": 0.0, "gone": false,
+		"yours": weapon.get("yours", true)})
 
 
-# Returns the enemies knocked out this frame.
+# Returns the enemies you knocked out this frame (not the guards' kills).
 func update(dt: float, enemies: Enemies) -> Array:
 	var kills := []
 	var finished := false
@@ -67,7 +68,7 @@ func update(dt: float, enemies: Enemies) -> Array:
 			s.gone = not s.lobbed
 		elif target:
 			target.hit(s.dir.x, s.dir.y, s.damage)
-			if not target.alive():
+			if not target.alive() and s.yours:
 				kills.append(target)
 			# Arrows and bolts stay stuck in whoever they hit
 			if not s.lobbed:

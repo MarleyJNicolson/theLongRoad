@@ -27,6 +27,29 @@ static func _pick(arr: Array) -> Variant:
 	return arr[randi() % arr.size()]
 
 
+# A soldier of the Empire: crimson tabard and cloak, an iron pot helm and
+# shoulder plates. The last of the garrisons hold the towns and guard the
+# traders.
+const CRIMSON := "#7a1f1f"
+const CLOAK := "#5a1414"
+const IRON := "#8a9096"
+
+
+static func soldier() -> Dictionary:
+	return {"skin": _pick(SKINS), "shirt": CRIMSON, "legs": "#575f6b", "boots": "#3c424d", "head": "helm",
+		"helm_colour": IRON, "visor": false, "crest": false, "extras": ["pauldrons", "cape"],
+		"pauldron_colour": IRON, "cape_colour": CLOAK}
+
+
+# A spearman with a shield, standing guard (or walking a beat if `wander`).
+static func spearman(x: float, y: float, facing_: float, wander_ := 0.0) -> Folk:
+	var s := Folk.new(soldier(), x, y, facing_, wander_)
+	s.rig.weapon = "spear"
+	s.rig.offhand = "shield"
+	s.rig.update(0, facing_, 0)
+	return s
+
+
 static func look(role := "villager") -> Dictionary:
 	var base := {"skin": _pick(SKINS), "shirt": _pick(SHIRTS), "legs": _pick(LEGS)}
 	var extra: Dictionary

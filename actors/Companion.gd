@@ -14,6 +14,15 @@ const KINDS := {
 		"cooldown": 0.8, # seconds between shots
 		"draw": 0.4, # seconds to draw the bow
 	},
+	# A soldier of the garrison: slower, harder-hitting bolts. Guards towns
+	# and traders; not for hire.
+	"crossbowman": {
+		"look": {}, # (each a Folk.soldier(), see _init)
+		"offhand": "crossbow",
+		"weapon": {"range": 480.0, "speed": 940.0, "damage": 2, "shot": "bolt", "yours": false}, # (their kills aren't yours)
+		"cooldown": 1.5,
+		"draw": 0.6,
+	},
 }
 const NAMES := ["Wynn", "Edric", "Maud", "Osric", "Hild", "Aldo", "Bryn", "Tamsin", "Cuthbert", "Elsa"]
 const SCAN := 0.25 # seconds between looks round for a target
@@ -32,14 +41,18 @@ var _scan := 0.0
 var _gaze := 0.0 # where they look, relative to the cart, with nothing to shoot
 
 
-func _init(kind_: String, who_: String) -> void:
+# `seated`: riding the cart; otherwise standing guard where they're put.
+func _init(kind_: String, who_: String, seated := true) -> void:
 	kind = kind_
 	who = who_
 	info = KINDS[kind]
-	rig = Rig.new(info.look)
-	rig.seated = true
-	rig.always = true
-	rig.offhand = "bow"
+	var look: Dictionary = info.look.duplicate()
+	if kind == "crossbowman":
+		look = Folk.soldier() # (each their own face)
+	rig = Rig.new(look)
+	rig.seated = seated
+	rig.always = seated
+	rig.offhand = info.get("offhand", "bow")
 	add_child(rig)
 
 
@@ -47,8 +60,8 @@ func title() -> String:
 	return "%s the %s" % [who, kind]
 
 
-# Look for a target and shoot at it. `cart_heading` is the way the cart faces;
-# returns nothing (shots go straight into `missiles`).
+# Look for a target and shoot at it. `cart_heading` is the way the cart faces
+# (or a guard's post faces); shots go straight into `missiles`.
 func update(dt: float, cart_heading: float, enemies: Enemies, missiles: Missiles) -> void:
 	var me := global_position
 	var reach: float = info.weapon.range
