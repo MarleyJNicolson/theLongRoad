@@ -819,6 +819,11 @@ func trade_view() -> Variant:
 	if not on_foot or not t.open or Vector2(t.x, t.y).distance_to(peasant.position) > TRADE_REACH + 40:
 		trading = null
 		return null
+	# Stalls shut at nightfall
+	if DayNight.is_night(clock):
+		trading = null
+		say("The %s shuts up shop for the night" % t.name.to_lower())
+		return null
 	var offers := []
 	for i in t.stock.size():
 		var offer: Dictionary = t.stock[i]
@@ -1357,6 +1362,9 @@ func _interaction() -> Variant:
 			return {"label": "E – " + offer, "x": h.x, "y": h.y, "act": func() -> void: hire(h)}
 	for t in encounters.traders():
 		if Vector2(t.x, t.y).distance_to(p) < TRADE_REACH:
+			if DayNight.is_night(clock):
+				return {"label": "The %s is shut for the night – come back at dawn" % t.name.to_lower(), "x": t.x, "y": t.y,
+					"act": func() -> void: say("Closed until dawn. You could sleep at an inn")}
 			var open: bool = trading == t
 			var label: String = "E – Stop trading" if open else "E – Trade with the %s" % t.name.to_lower()
 			return {"label": label, "x": t.x, "y": t.y, "act": func() -> void: trading = null if open else t}

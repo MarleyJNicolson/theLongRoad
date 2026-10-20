@@ -87,6 +87,10 @@ static func threat_at(metres: float) -> Dictionary:
 		"elite_chance": minf(0.45, maxf(0.0, km - 1.0) * 0.05),
 		# Room for bigger groups than the base caps allow
 		"extra_members": floori(km / 3.0),
+		# Past the first town, every camp, ambush and raid is reinforced by
+		# this share of its numbers again: half as many more at 1 km, rising
+		# to two and a half times as many
+		"reinforce": 0.0 if km < 1.0 else minf(1.5, 0.5 + (km - 1.0) * 0.12),
 		# Road points between encounters: closer together, but never on top of each other
 		"spacing": maxf(22.0, 60.0 - km * 5.0),
 	}

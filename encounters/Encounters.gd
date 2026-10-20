@@ -226,6 +226,7 @@ func place() -> void:
 		for key in ["solids", "loot", "members"]:
 			if not enc.has(key):
 				enc[key] = []
+		_reinforce(enc, threat.reinforce)
 		# Clear any trees already standing in its way (side roads, paths in the wilds)
 		if on_new_zones.is_valid():
 			on_new_zones.call(enc.zones)
@@ -240,6 +241,22 @@ func place() -> void:
 		if entry:
 			last = entry
 		next_index += floori(threat.spacing * randf_range(0.85, 1.2))
+
+
+# More of them: copies of the rank and file already there (the leaders stay
+# one of a kind), standing among them; those hiding share their hiding place.
+func _reinforce(enc: Dictionary, share: float) -> void:
+	var ranks: Array = enc.members.filter(func(m: Enemy) -> bool: return m.type != "captain" and m.type != "brute" and m.type != "orc")
+	if ranks.is_empty() or share <= 0:
+		return
+	var extra := roundi(enc.members.size() * share)
+	for n in extra:
+		var m: Enemy = ranks[randi() % ranks.size()]
+		var home: Dictionary = m.home.duplicate(true)
+		var at := Vector2(home.x, home.y)
+		if not home.get("hidden", false):
+			at += Vector2.from_angle(randf() * TAU) * randf_range(14, 30)
+		enc.members.append(enemies.add(m.type, at.x, at.y, home))
 
 
 func _place_town(i: int) -> void:

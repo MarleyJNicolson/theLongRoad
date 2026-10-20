@@ -219,7 +219,8 @@ func _spawn(player: Vector2, road_index: int, metres: float, towns: Array, meado
 	var threat := Threat.threat_at(metres)
 	threat.elite_chance = minf(0.6, threat.elite_chance + ELITE_BONUS)
 	var km := metres / 1000.0
-	var count := mini(10, 4 + threat.extra_members + floori(km / 2) - (1 if meadows else 0))
+	# Bigger the further you go (the Meadows' stay small enough to slip past)
+	var count := mini(18, 6 + threat.extra_members + floori(km) - (2 if meadows else 0))
 	var small := "goblin" if faction == "goblin" else "bandit"
 	var heavy := "orc" if faction == "goblin" else "brute"
 	var archer := "goblinArcher" if faction == "goblin" else "archer"
@@ -235,7 +236,8 @@ func _spawn(player: Vector2, road_index: int, metres: float, towns: Array, meado
 	enemies.threat = threat
 	for k in types.size():
 		var a := float(k) / types.size() * TAU
-		var e := enemies.add(types[k], at.x + cos(a) * 26, at.y + sin(a) * 26, home)
+		var spread := 18.0 + types.size() * 2.5
+		var e := enemies.add(types[k], at.x + cos(a) * spread, at.y + sin(a) * spread, home)
 		e.leash = HUNT_LEASH
 		members.append(e)
 	enemies.threat = before
