@@ -18,7 +18,7 @@ const WINDED_FILL := Color("#8a7a5a")
 const EMPTY := Color("#cf5528")
 const FOOT_CONTROLS := "WASD walk · Shift sprint · Ctrl/Space dash · E interact · Click attack · Right mouse shield · R swap · B bag · C cart"
 const CART_CONTROLS := "W/S speed · A/D steer · Shift gallop · E get off · Click attack · Right mouse shield · R swap · B bag · C cart"
-const DEV_KEYS := "F2 / F3 weapons · F4 raiders · F5 huge wave\nF6 off hand · F7 archer · F8 armour\nF9 next town · F10 dev mode off\nF1 filter · 1-4 zoom"
+const DEV_KEYS := "F2 / F3 weapons · F4 raiders · F5 huge wave\nF6 off hand · F7 archer · F8 armour\nF9 next town · F10 dev mode off\nF1 filter · 1-4 zoom (or scroll)"
 
 
 # A control that draws itself with `paint` (bars, hearts, coins).

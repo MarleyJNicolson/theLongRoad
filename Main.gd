@@ -105,6 +105,12 @@ var _device_px := PixelArt.PIXEL_SIZE
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and not "--nomouse" in OS.get_cmdline_user_args():
 		game.pointer_active = true
+	# The scroll wheel zooms (not over a panel)
+	if event is InputEventMouseButton and event.pressed and get_viewport().gui_get_hovered_control() == null:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			game.zoom_by(1.15)
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			game.zoom_by(1 / 1.15)
 
 
 func _notification(what: int) -> void:

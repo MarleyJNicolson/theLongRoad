@@ -32,8 +32,10 @@ const BODY := {
 # How far each kind of weapon reaches from the hand, and how it's drawn.
 const WEAPON_LENGTH := {"dagger": 9.0, "club": 14.0, "sword": 18.0, "cleaver": 18.0, "mace": 15.0, "spear": 30.0, "axe": 16.0}
 
-const GRAVITY := 900.0
-const RAGDOLL_TIME := 1.8 # seconds before a corpse settles for good
+const GRAVITY := 620.0
+const RAGDOLL_TIME := 2.6 # seconds before a corpse settles for good
+const RAGDOLL_STEP := 1.0 / 120.0 # the ragdoll moves in fixed steps, whatever the frame rate
+const GROUND_GRIP := 0.82 # share of its slide a limb keeps each step it's on the ground
 
 # Player move durations (seconds), by name.
 const MOVE_TIME := {"swing": 0.18, "slash": 0.11, "jab": 0.2, "heavy": 0.16}
@@ -196,29 +198,36 @@ func hit_by() -> void:
 	flinch = 1.0
 
 
-# Go limp: start the ragdoll from the current pose, flung along (dx, dy).
+# Go limp: start the ragdoll from the current pose, struck along (dx, dy).
+# The blow rocks the head and shoulders back while the feet stay planted, and
+# the knees give, so the body topples and crumples rather than flying; a
+# heavy blow (`force`) knocks them down harder, and big figures budge less.
 func die(dx := 0.0, dy := 0.0, force := 1.0) -> void:
 	if ragdoll:
 		return
 	var joints: Dictionary = pose().joints
 	var f := Vector2(cos(facing), sin(facing))
 	var l := Vector2(-f.y, f.x)
+	var mass := k * k
 	var parts := {}
 	for joint_name in joints:
 		var p: Vector3 = joints[joint_name]
 		var x := f.x * p.x + l.x * p.y
 		var y := f.y * p.x + l.y * p.y
-		# Knocked along the blow, the upper body most, with a little lift
-		var push := (60.0 + 90.0 * force) * (0.4 + p.z / height())
-		var v := Vector3(dx * push + (randf() - 0.5) * 30.0, dy * push + (randf() - 0.5) * 30.0, 40.0 + randf() * 30.0)
+		var up := clampf(p.z / height(), 0, 1) # 0 at the feet, 1 at the head
+		var push := (28.0 + 42.0 * force) * up * up / mass
+		var v := Vector3(dx * push + randf_range(-5, 5), dy * push + randf_range(-5, 5), 0)
+		if joint_name == "kneeL" or joint_name == "kneeR":
+			# The knees buckle forwards, against the blow
+			v += Vector3(f.x, f.y, 0) * 14.0 - Vector3(dx, dy, 0) * 6.0 - Vector3(0, 0, 10)
 		var at := Vector3(x, y, p.z)
-		parts[joint_name] = Particle.new(at, at - v / 60.0)
+		parts[joint_name] = Particle.new(at, at - v * RAGDOLL_STEP)
 	var sticks := []
 	for pair in STICKS:
 		var a: Particle = parts[pair[0]]
 		var b: Particle = parts[pair[1]]
 		sticks.append([a, b, a.p.distance_to(b.p)])
-	ragdoll = {"parts": parts, "sticks": sticks, "t": 0.0, "weapon": weapon, "offhand": offhand}
+	ragdoll = {"parts": parts, "sticks": sticks, "t": 0.0, "acc": 0.0, "weapon": weapon, "offhand": offhand}
 	move = null
 	strike = null
 	trail = null
@@ -467,18 +476,21 @@ func _simulate(dt: float) -> void:
 	if ragdoll.t > RAGDOLL_TIME:
 		return
 	ragdoll.t += dt
-	var steps := 2
-	var h := minf(dt, 1.0 / 30.0) / steps
-	for s in steps:
+	# Fixed steps, so a body falls the same at any frame rate (and a long
+	# frame doesn't fling it)
+	ragdoll.acc = minf(ragdoll.acc + dt, 0.05)
+	var h := RAGDOLL_STEP
+	while ragdoll.acc >= h:
+		ragdoll.acc -= h
 		for part: Particle in ragdoll.parts.values():
-			var v := (part.p - part.prev) * 0.99
+			var v := (part.p - part.prev) * 0.997
 			part.prev = part.p
 			part.p += v
 			part.p.z -= GRAVITY * h * h
 			if part.p.z < 0:
-				# Hit the ground: stop falling, and drag
+				# On the ground: no bounce, and it grips rather than slides
 				part.p.z = 0
-				part.prev = Vector3(part.p.x - v.x * 0.55, part.p.y - v.y * 0.55, 0)
+				part.prev = Vector3(part.p.x - v.x * GROUND_GRIP, part.p.y - v.y * GROUND_GRIP, 0)
 		for it in 6:
 			for stick in ragdoll.sticks:
 				var a: Particle = stick[0]

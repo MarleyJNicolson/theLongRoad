@@ -1802,8 +1802,22 @@ func debug_spawn() -> void:
 	say("Debug: a band of %ss" % faction)
 
 
+# The scroll wheel zooms in and out (eased towards `zoom_target`).
+const ZOOM_MIN := 0.5
+const ZOOM_MAX := 3.0
+var zoom_target := 1.0
+var view_zoom := 1.0
+
+
+func zoom_by(factor: float) -> void:
+	zoom_target = clampf(zoom_target * factor, ZOOM_MIN, ZOOM_MAX)
+
+
 func update_camera(dt: float) -> void:
-	var zoom := art_zoom * debug_zoom
+	view_zoom = lerpf(view_zoom, zoom_target, 1.0 - exp(-dt * 12))
+	if absf(view_zoom - zoom_target) < 0.002:
+		view_zoom = zoom_target
+	var zoom := art_zoom * debug_zoom * view_zoom
 	var half := Vector2(get_viewport().size) / 2.0
 	# Half the view, and the edge margin, in world units
 	var view_half := half / zoom
