@@ -35,8 +35,18 @@ func _init(size_: float, dpr_: float, show_: Callable) -> void:
 		hovered.emit(false))
 
 
+var _shown := ""
+
+
+# Redraw only when what it shows changes (icons are drawn as polygons, which
+# is slow in Godot).
 func _process(_dt: float) -> void:
-	queue_redraw()
+	if not is_visible_in_tree():
+		return
+	var now := "%s|%s|%s" % [look_of.call(), _hover, size]
+	if now != _shown:
+		_shown = now
+		queue_redraw()
 
 
 func _gui_input(event: InputEvent) -> void:

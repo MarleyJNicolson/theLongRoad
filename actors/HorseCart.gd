@@ -118,7 +118,7 @@ func _init(layer: Node2D, x_: float, y_: float, heading_: float) -> void:
 	cart.add_child(driver)
 	cart.add_child(cart_front)
 	# A lantern on the cart, to see the road by at night
-	lantern = Glow.light(190, Color("#ffd99a"), 1.0)
+	lantern = Glow.light(260, Color("#ffd99a"), 1.0)
 	cart.add_child(lantern)
 	horse = Painter.new(_draw_horse)
 	layer.add_child(shafts)
@@ -279,7 +279,7 @@ func _draw_horse(ci: CanvasItem) -> void:
 	for n in 16:
 		var t := n * PI / 8
 		shadow.append(P.xy(cos(t) * 20, sin(t) * 6))
-	Sketch.fill(ci, shadow, Color(0, 0, 0, 0.22))
+	Draw.convex(ci, shadow, Color(0, 0, 0, 0.22))
 
 	var parts := []
 	var legs := [[10.0, -3.6, -1.0], [10.0, 3.6, -1.0], [-11.0, -3.6, 1.0], [-11.0, 3.6, 1.0]]
@@ -295,9 +295,9 @@ func _draw_horse(ci: CanvasItem) -> void:
 		var f := P.at(foot.x, foot.y, foot.z)
 		var upper: Color = HORSE.coat if b * near > 0 else HORSE.shade
 		parts.append([(t.z + f.z) / 2, func() -> void:
-			Sketch.round_line(ci, PackedVector2Array([Vector2(t.x, t.y), Vector2(k.x, k.y)]), 4, upper)
-			Sketch.round_line(ci, PackedVector2Array([Vector2(k.x, k.y), Vector2(f.x, f.y)]), 2.4, HORSE.shade)
-			ci.draw_circle(Vector2(f.x, f.y), 1.9, HORSE.hoof)])
+			Draw.round_line(ci, PackedVector2Array([Vector2(t.x, t.y), Vector2(k.x, k.y)]), 4, upper)
+			Draw.round_line(ci, PackedVector2Array([Vector2(k.x, k.y), Vector2(f.x, f.y)]), 2.4, HORSE.shade)
+			Draw.circle(ci, Vector2(f.x, f.y), 1.9, HORSE.hoof)])
 
 	var z := 21 + bob
 	var rump := P.at(-14, 0, z + 1 - pitch)
@@ -310,7 +310,7 @@ func _draw_horse(ci: CanvasItem) -> void:
 	var body := func() -> void:
 		var r: Vector2 = xy.call(rump)
 		var c: Vector2 = xy.call(chest)
-		Sketch.round_line(ci, PackedVector2Array([r, c]), 13, HORSE.coat)
+		Draw.round_line(ci, PackedVector2Array([r, c]), 13, HORSE.coat)
 		# Back lit, belly shaded
 		ci.draw_line(r - Vector2(0, 4), c - Vector2(0, 4), Color(HORSE.light, 0.7), 3)
 		ci.draw_line(r + Vector2(0, 4), c + Vector2(0, 4), Color(HORSE.shade, 0.7), 3)
@@ -322,18 +322,18 @@ func _draw_horse(ci: CanvasItem) -> void:
 		var w: Vector2 = xy.call(withers)
 		var p: Vector2 = xy.call(poll)
 		var m: Vector2 = xy.call(muzzle)
-		Sketch.round_line(ci, PackedVector2Array([w, p]), 7, HORSE.coat)
-		Sketch.round_line(ci, PackedVector2Array([w - Vector2(0, 3), p - Vector2(0, 3)]), 2.5, HORSE.mane)
-		Sketch.round_line(ci, PackedVector2Array([p, m]), 5.5, HORSE.coat)
-		ci.draw_circle(m, 2.6, HORSE.shade)
+		Draw.round_line(ci, PackedVector2Array([w, p]), 7, HORSE.coat)
+		Draw.round_line(ci, PackedVector2Array([w - Vector2(0, 3), p - Vector2(0, 3)]), 2.5, HORSE.mane)
+		Draw.round_line(ci, PackedVector2Array([p, m]), 5.5, HORSE.coat)
+		Draw.circle(ci, m, 2.6, HORSE.shade)
 		var ear := P.xy(17, 0, z + 18 + pitch * 1.5)
-		Sketch.fill(ci, PackedVector2Array([p + Vector2(-1.5, -1), ear, p + Vector2(1.5, -1)]), HORSE.shade)
-		ci.draw_circle(P.xy(20, 1.6 if near > 0 else -1.6, z + 12 + pitch * 1.5), 0.9, Color("#0e0b0a"))
+		Draw.convex(ci, PackedVector2Array([p + Vector2(-1.5, -1), ear, p + Vector2(1.5, -1)]), HORSE.shade)
+		Draw.circle(ci, P.xy(20, 1.6 if near > 0 else -1.6, z + 12 + pitch * 1.5), 0.9, Color("#0e0b0a"))
 		# Bridle
 		ci.draw_line(p, m, Color(HORSE.tack, 0.9), 1)
 	var tail := func() -> void:
 		var r: Vector2 = xy.call(rump)
-		Sketch.round_line(ci, Sketch.quad_curve(r, Vector2(r.x + (tail_end.x - r.x) * 0.3, r.y), tail_end), 3.2, HORSE.mane)
+		Draw.round_line(ci, Sketch.quad_curve(r, Vector2(r.x + (tail_end.x - r.x) * 0.3, r.y), tail_end), 3.2, HORSE.mane)
 	parts.append([0.0, body])
 	parts.append([maxf(withers.z, poll.z) + 0.5, head])
 	parts.append([rump.z - 0.5, tail])
@@ -362,7 +362,7 @@ func _draw_wheel(ci: CanvasItem, P: View, a: float, b: float) -> void:
 		segments.append(rim[n])
 		segments.append(rim[n + 1])
 	ci.draw_multiline(segments, CART.iron, 2.5)
-	ci.draw_circle(hub, 2, CART.iron)
+	Draw.circle(ci, hub, 2, CART.iron)
 
 
 # The cart is split around the driver: wheels, walls and cargo behind them
@@ -380,11 +380,11 @@ func _draw_cart(ci: CanvasItem, behind: bool) -> void:
 		var out := PackedVector2Array()
 		for p in pts:
 			out.append(P.xy(p.x, p.y, p.z))
-		Sketch.fill(ci, out, colour)
+		Draw.convex(ci, out, colour)
 	# Walls as quads: corners along the bottom, raised to the rim
 	var wall := func(c: Array, colour: Color) -> void:
 		quad.call([Vector3(c[0], c[1], floor_z), Vector3(c[2], c[3], floor_z), Vector3(c[2], c[3], rim), Vector3(c[0], c[1], rim)], colour)
-		Sketch.round_line(ci, PackedVector2Array([P.xy(c[0], c[1], rim), P.xy(c[2], c[3], rim)]), 2, CART.dark)
+		Draw.round_line(ci, PackedVector2Array([P.xy(c[0], c[1], rim), P.xy(c[2], c[3], rim)]), 2, CART.dark)
 		var mid := (floor_z + rim) / 2
 		ci.draw_line(P.xy(c[0], c[1], mid), P.xy(c[2], c[3], mid), Color(CART.dark, 0.6), 1)
 	var walls := {
@@ -407,12 +407,12 @@ func _draw_cart(ci: CanvasItem, behind: bool) -> void:
 			a += 7
 		# Cargo: a heap of hay and two sacks
 		var hay := P.xy(-9, -3, floor_z + 5)
-		ci.draw_colored_polygon(Sketch.ellipse_points(hay, 10, 7), Color("#d9b44a"))
-		ci.draw_colored_polygon(Sketch.ellipse_points(hay - Vector2(2, 2), 5, 3.5), Color("#e6c766"))
+		Draw.ellipse(ci, hay, 10, 7, Color("#d9b44a"))
+		Draw.ellipse(ci, hay - Vector2(2, 2), 5, 3.5, Color("#e6c766"))
 		for s in [Vector2(-12, 8), Vector2(-3, -9)]:
 			var sack := P.xy(s.x, s.y, floor_z + 4)
-			ci.draw_colored_polygon(Sketch.ellipse_points(sack, 5, 4.5), Color("#c9b28a"))
-			ci.draw_colored_polygon(Sketch.ellipse_points(sack - Vector2(1, 1.5), 2, 1.5), Color("#d6c49c"))
+			Draw.ellipse(ci, sack, 5, 4.5, Color("#c9b28a"))
+			Draw.ellipse(ci, sack - Vector2(1, 1.5), 2, 1.5, Color("#d6c49c"))
 		# The driver's bench
 		quad.call([Vector3(15, -wide + 1, floor_z + 8), Vector3(9, -wide + 1, floor_z + 8), Vector3(9, wide - 1, floor_z + 8), Vector3(15, wide - 1, floor_z + 8)], CART.dark)
 	else:
@@ -431,7 +431,7 @@ func _draw_shafts(ci: CanvasItem) -> void:
 	var P := View.new(cart_heading)
 	var H := View.new(heading)
 	for side in [-1.0, 1.0]:
-		Sketch.round_line(ci, PackedVector2Array([cart_at + P.xy(CART.long, side * 11, 15), horse_at + H.xy(-3, side * 6.5, 19)]), 2.5, Color("#5a3a1a"))
+		Draw.round_line(ci, PackedVector2Array([cart_at + P.xy(CART.long, side * 11, 15), horse_at + H.xy(-3, side * 6.5, 19)]), 2.5, Color("#5a3a1a"))
 	if driver.visible:
 		for side in [-1.0, 1.0]:
 			ci.draw_line(cart_at + P.xy(19, side * 3, CART.floor + 15), horse_at + H.xy(22, side * 1.5, 30), Color("#2a180c"), 0.8)

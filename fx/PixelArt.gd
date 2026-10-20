@@ -11,7 +11,7 @@ const PIXEL_SIZE := 2
 
 # How far the camera zooms in on the world, so sprites get enough art pixels
 # to read clearly.
-const WORLD_ZOOM := 1.3
+const WORLD_ZOOM := 1.0 # (1.3 in the JS: this shows 30% more)
 
 # A muted, earthy palette with warm accents: soot and bone, moss, stone and
 # steel, then blood, rust, fire and gold.

@@ -79,7 +79,7 @@ static func draw_solid(g: Sketch, faces: Array, outline: Variant = null) -> void
 			continue
 		var light := 1.0 if f.flat else 0.68 + 0.42 * maxf(0.0, n.dot(LIGHT))
 		var pts := project_all(f.pts)
-		g.poly(pts, shade(f.colour, light))
+		g.convex(pts, shade(f.colour, light))
 		if outline != null:
 			var ink: Color = outline
 			ink.a = 0.5

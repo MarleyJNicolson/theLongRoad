@@ -9,8 +9,8 @@ extends RefCounted
 # base sits at the origin (where it meets the ground) and it rises up the
 # screen.
 
-const SPREAD := 950.0 # how far from the road the land is dressed
-const ATTEMPTS := 5 # tries per side for each stretch of road
+const SPREAD := 1500.0 # how far from the road the land is dressed (950 in the JS)
+const ATTEMPTS := 8 # tries per side for each stretch of road (5 in the JS, over less land)
 
 const BARK := Color("#5c4632")
 const BARK_SHADE := Color("#46352a")
@@ -57,6 +57,18 @@ var items: Array = []
 var placed_up_to := 0
 var _obstacles: Array = []
 var _obstacles_dirty := true
+# Kept apart from `items` so the per-frame and per-placement checks stay quick
+# with thousands of things about: trees (they fade), things to gather stones
+# from, and grids of big things, road points and zones (see _is_clear).
+var _trees: Array = []
+var _gatherable: Array = []
+var _big := Grid.new(160)
+var _road := Grid.new(128)
+var _road_filed := 0 # road points filed in _road so far
+var _zones := Grid.new(256)
+var _zones_seen: Variant = null # the zone list _zones was built from
+var _culled_at := -1
+const BIGGEST := 48.0 # the largest radius of anything big (a ruin)
 
 
 # `upright_layer` is the depth-sorted layer shared with the people.
@@ -99,6 +111,10 @@ func update(index: int, budget := 1 << 30) -> void:
 		budget -= 1
 		_place_around(placed_up_to)
 		placed_up_to += 1
+	# Clear away what's long behind (only when the road index moves on)
+	if index == _culled_at:
+		return
+	_culled_at = index
 	var before := items.size()
 	items = items.filter(func(item: Dictionary) -> bool:
 		if item.index >= index - 80:
@@ -109,17 +125,22 @@ func update(index: int, budget := 1 << 30) -> void:
 		_obstacles_dirty = true
 
 
+# Take an item off the map (and out of the lists and grids that know it).
 func _remove(item: Dictionary) -> void:
 	item.obj.queue_free()
 	for o in item.extras:
 		o.queue_free()
+	if item.height:
+		_trees.erase(item)
+	if item.kind == "rock" or item.kind == "boulder":
+		_gatherable.erase(item)
+	if item.big:
+		_big.remove(Vector2(item.x, item.y), 0, item)
 
 
 # Trees you're standing behind fade, so you never lose sight of yourself.
 func fade_around(x: float, y: float) -> void:
-	for item in items:
-		if not item.height:
-			continue
+	for item in _trees:
 		var hidden: bool = y < item.y and y > item.y - item.height and absf(x - item.x) < item.r + 6
 		var target := 0.4 if hidden else 1.0
 		item.obj.modulate.a += (target - item.obj.modulate.a) * 0.2
@@ -189,8 +210,15 @@ func _place(feature: String, x: float, y: float, i: int, biome: Dictionary) -> b
 		solids = [Vector3(x, y, r * f.solid[0] + f.solid[1])]
 	var gather := randi_range(f.stones[0], f.stones[1]) if f.has("stones") else 0
 	var height: float = drawn.get("height", 0.0) if f.has("tree") else 0.0 # only trees fade (see fade_around)
-	items.append({"obj": obj, "extras": extras, "index": i, "x": x, "y": y, "r": r, "big": big,
-		"solids": solids, "gather": gather, "kind": feature, "height": height})
+	var item := {"obj": obj, "extras": extras, "index": i, "x": x, "y": y, "r": r, "big": big,
+		"solids": solids, "gather": gather, "kind": feature, "height": height}
+	items.append(item)
+	if height:
+		_trees.append(item)
+	if gather:
+		_gatherable.append(item)
+	if big:
+		_big.add(Vector2(x, y), 0, item)
 	if not solids.is_empty():
 		_obstacles_dirty = true
 	return true
@@ -200,9 +228,7 @@ func _place(feature: String, x: float, y: float, i: int, biome: Dictionary) -> b
 func gatherable_near(x: float, y: float, reach: float) -> Variant:
 	var best: Variant = null
 	var best_dist := INF
-	for item in items:
-		if not item.gather:
-			continue
+	for item in _gatherable:
 		var d: float = Vector2(item.x - x, item.y - y).length() - item.r
 		if d < reach and d < best_dist:
 			best = item
@@ -220,29 +246,39 @@ func quarry(item: Dictionary, taken: int) -> void:
 		_remove(item)
 		items.erase(item)
 	else:
+		_gatherable.erase(item)
 		item.obj.modulate = Color("#c8c2b8", item.obj.modulate.a)
 		for k in 6:
 			item.obj.circle(Vector2(randf_range(-item.r, item.r) * 0.8, -item.r * randf_range(0.1, 1.1)), randf_range(1, 2.5), Color("#a8a59a"))
 
 
-# Clear of the road, encounters, and (for big things) other big things.
+# Clear of the road, encounters, and (for big things) other big things. (The
+# JS checked 140 road points and the last 400 things every time; here grids
+# narrow it to what's nearby.)
 func _is_clear(x: float, y: float, i: int, margin: float, room: float) -> bool:
 	var at := Vector2(x, y)
-	for z: Vector3 in get_zones.call():
+	# Encounter zones: refiled whenever the list of them changes
+	var zones: Array = get_zones.call()
+	if not is_same(zones, _zones_seen):
+		_zones.clear()
+		for z: Vector3 in zones:
+			_zones.add(Vector2(z.x, z.y), z.z, z)
+		_zones_seen = zones
+	for z: Vector3 in _zones.near(at, margin):
 		if Vector2(z.x, z.y).distance_to(at) < z.z + margin:
 			return false
-	var pts := road.points
-	var road_clear := pow(Road.ROAD_WIDTH / 2 + margin, 2)
-	for j in range(maxi(0, i - 70), mini(pts.size(), i + 70)):
-		if pts[j].distance_squared_to(at) < road_clear:
+	# The road (filed as far as it goes)
+	while _road_filed < road.points.size():
+		_road.add(road.points[_road_filed], 0, _road_filed)
+		_road_filed += 1
+	var road_reach := Road.ROAD_WIDTH / 2 + margin
+	for j: int in _road.near(at, road_reach):
+		if road.points[j].distance_squared_to(at) < road_reach * road_reach:
 			return false
 	if room:
-		var k := items.size() - 1
-		while k >= 0 and k > items.size() - 400:
-			var o: Dictionary = items[k]
-			if o.big and Vector2(o.x - x, o.y - y).length() < (o.r + room) * 0.8:
+		for o: Dictionary in _big.near(at, (BIGGEST + room) * 0.8):
+			if Vector2(o.x - x, o.y - y).length() < (o.r + room) * 0.8:
 				return false
-			k -= 1
 	return true
 
 

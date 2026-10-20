@@ -44,6 +44,7 @@ var rewards: Array = [] # { gold, x, y, message? } earned by clearing out raids
 var on_new_zones: Callable # called with zones that appear where scenery already is
 var last_side_road := FIRST_SIDE_ROAD_BY - MAX_SIDE_ROAD_GAP # metres
 var next_town := Towns.next_along(Road.start_along + 1) # px along the road
+var _zones_cache: Variant = null # zones(), until the list of encounters changes
 
 
 func _init(layer_: Node2D, upright_: Node2D, road_: Road, enemies_: Enemies) -> void:
@@ -70,11 +71,15 @@ func town_at(at: Vector2) -> Variant:
 	return null
 
 
+# Every encounter's zones. The same array is handed out until encounters
+# come or go (scenery uses that to know when to refile them).
 func zones() -> Array:
-	var out := []
-	for e in list:
-		out.append_array(e.zones)
-	return out
+	if _zones_cache == null:
+		var out := []
+		for e in list:
+			out.append_array(e.zones)
+		_zones_cache = out
+	return _zones_cache
 
 
 # Traders open for business (villages at the end of side roads).
@@ -211,6 +216,7 @@ func place() -> void:
 				Loot.add_arrow_barrel(enc.loot, b, Vector2(m.home.x + cos(a) * 30, m.home.y + sin(a) * 30))
 				break
 		list.append(enc)
+		_zones_cache = null
 		if entry:
 			last = entry
 		next_index += floori(threat.spacing * randf_range(0.85, 1.2))
@@ -229,6 +235,7 @@ func _place_town(i: int) -> void:
 	if on_new_zones.is_valid():
 		on_new_zones.call(town.zones)
 	list.append(town)
+	_zones_cache = null
 
 
 # Buildings you're standing behind fade, so you never lose sight of yourself.
@@ -268,6 +275,7 @@ func update(dt: float, player: Dictionary, road_index: int) -> void:
 				enc.on_cleared.call()
 			rewards.append(enc.reward)
 
+	var before := list.size()
 	list = list.filter(func(enc: Dictionary) -> bool:
 		if enc.index >= road_index - 70:
 			return true
@@ -283,6 +291,8 @@ func update(dt: float, player: Dictionary, road_index: int) -> void:
 			l.clear()
 		enc.clear()
 		return false)
+	if list.size() != before:
+		_zones_cache = null
 
 
 # Let go of everything (a restart, or quitting). A chest's functions refer
@@ -293,3 +303,4 @@ func dispose() -> void:
 			l.clear()
 		enc.clear()
 	list.clear()
+	_zones_cache = null

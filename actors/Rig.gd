@@ -55,6 +55,45 @@ const SHAFT_SPOTS := [
 ]
 
 
+# Colours, parsed once
+const C_1C1714 := Color("#1c1714")
+const C_2B221C := Color("#2b221c")
+const C_3A3620 := Color("#3a3620")
+const C_4A3220 := Color("#4a3220")
+const C_5E3F22 := Color("#5e3f22")
+const C_6B4A2A := Color("#6b4a2a")
+const C_6E4A28 := Color("#6e4a28")
+const C_7D8590 := Color("#7d8590")
+const C_8A9096 := Color("#8a9096")
+const C_8B6236 := Color("#8b6236")
+const C_9A968C := Color("#9a968c")
+const C_A6AEB7 := Color("#a6aeb7")
+const C_B9C0C8 := Color("#b9c0c8")
+const C_C29D48 := Color("#c29d48")
+const C_C9A227 := Color("#c9a227")
+const C_C9B28A := Color("#c9b28a")
+const C_C9C9C9 := Color("#c9c9c9")
+const C_D4B25E := Color("#d4b25e")
+const C_D8CFB4 := Color("#d8cfb4")
+const C_D8DDE2 := Color("#d8dde2")
+const C_E8E0C8 := Color("#e8e0c8")
+const C_EFE6CF := Color("#efe6cf")
+const C_FFCF3A := Color("#ffcf3a")
+const C_FFE14D := Color("#ffe14d")
+const C_FFF4D6 := Color("#fff4d6")
+const QUIVER := C_6E4A28
+const FLETCH := C_E8E0C8
+
+# The parts of a figure, drawn far to near (see _draw), and the four limbs:
+# [joints..., width, style colour, end radius, end style colour]
+enum { PART_LIMB, PART_TORSO, PART_QUIVER, PART_HEAD, PART_WEAPON, PART_OFFHAND, PART_SHAFT }
+const LIMBS := [
+	["hipL", "kneeL", "footL", 3.4, "legs", 1.9, "boots"],
+	["hipR", "kneeR", "footR", 3.4, "legs", 1.9, "boots"],
+	["shL", "elbL", "handL", 2.8, "shirt", 1.6, "skin"],
+	["shR", "elbR", "handR", 2.8, "shirt", 1.6, "skin"],
+]
+
 # One point of the ragdoll (verlet: current and previous position).
 class Particle:
 	var p: Vector3
@@ -91,6 +130,13 @@ var ragdoll: Variant = null # { parts: {name: Particle}, sticks, t, weapon, offh
 var stuck: Array = [] # arrows and bolts sticking out of it
 
 var _frame: Dictionary = {} # the pose worked out by the last update, for _draw
+var _settled_drawn := false # a corpse at rest is drawn once more, then left be
+var _last_look: Array = [] # what the last drawing showed (see update)
+
+# The part of the world in view (plus a margin), set by Game each frame: rigs
+# outside it keep time but skip working out and drawing their pose, which is
+# most of their cost. (Infinite until set, so everything draws.)
+static var view := Rect2(-1e9, -1e9, 2e9, 2e9)
 
 
 func _init(style_: Dictionary) -> void:
@@ -207,6 +253,26 @@ func update(dt: float, facing_: float, speed_: float) -> void:
 		if offhand == "sling" and aiming:
 			spin += dt * (6.0 + pull * 22.0)
 		flinch = maxf(0.0, flinch - dt * 4.0)
+	# A corpse that has come to rest: draw it once more, then leave it be
+	if ragdoll and ragdoll.t > RAGDOLL_TIME:
+		if not _settled_drawn:
+			_settled_drawn = true
+			queue_redraw()
+		return
+	# Out of sight: nothing to draw (finished moves still end on time)
+	if not view.has_point(global_position):
+		if move and move.t > MOVE_TIME.get(move.name, 0.0) + move.windup:
+			move = null
+		return
+	# Unchanged since it was last drawn (someone standing about): leave it be.
+	# Drawing a figure is the dear part, and most of them are idle.
+	if not ragdoll:
+		var look := [facing, phase if speed > 0.5 else -1.0, flinch, kick, pull, spin, wave, lean, aiming, loaded,
+			weapon, offhand, seated, stuck.size(), move.t if move else -1.0,
+			str(strike.phase) + str(strike.p) if strike else ""]
+		if look == _last_look:
+			return
+		_last_look = look
 	# Work the pose out now (it also ends finished moves), draw it later.
 	_frame = {} if ragdoll else pose()
 	queue_redraw()
@@ -393,10 +459,7 @@ func _simulate(dt: float) -> void:
 
 # A thick line with round caps and joins.
 func _round_line(points: PackedVector2Array, width: float, colour: Color) -> void:
-	draw_polyline(points, colour, width)
-	if colour.a >= 1.0:
-		for p in points:
-			draw_circle(p, width / 2, colour)
+	Draw.round_line(self, points, width, colour)
 
 
 func _line(p: Vector2, q: Vector2, width: float, colour: Color) -> void:
@@ -404,7 +467,7 @@ func _line(p: Vector2, q: Vector2, width: float, colour: Color) -> void:
 
 
 func _ellipse(c: Vector2, rx: float, ry: float, colour: Color) -> void:
-	draw_colored_polygon(Sketch.ellipse_points(c, rx, ry), colour)
+	Draw.ellipse(self, c, rx, ry, colour)
 
 
 static func _quad_curve(a: Vector2, control: Vector2, b: Vector2) -> PackedVector2Array:
@@ -452,49 +515,65 @@ func _draw() -> void:
 			for n in 9:
 				var al := lerpf(trail[0], trail[1], n / 8.0)
 				line.append(_xy(proj.call(joints.shR + Vector3(cos(al) * R, sin(al) * R, -2 * k))))
-			draw_polyline(line, Color("#fff4d6", 0.6), 2.5)
+			draw_polyline(line, Color(C_FFF4D6, 0.6), 2.5)
 
 	# Shadow on the ground under the body
 	if not ragdoll and not seated:
 		var c := Vector2((pts.hipL.x + pts.hipR.x) / 2, (pts.hipL.z + pts.hipR.z) / 2)
 		_ellipse(c, 7 * k, 3 * k, Color(0, 0, 0, 0.25))
 
-	# Parts, drawn far to near: [depth, Callable]
-	var parts := []
-	var limb := func(a: String, b: String, c: String, width: float, colour: Color, end_r: float, end_colour: Color) -> void:
-		parts.append([(pts[a].z + pts[b].z + pts[c].z) / 3.0, func() -> void:
-			_round_line(PackedVector2Array([_xy(pts[a]), _xy(pts[b]), _xy(pts[c])]), width * k, colour)
-			draw_circle(_xy(pts[c]), end_r * k, end_colour)])
-	limb.call("hipL", "kneeL", "footL", 3.4, st.legs, 1.9, st.boots)
-	limb.call("hipR", "kneeR", "footR", 3.4, st.legs, 1.9, st.boots)
-	limb.call("shL", "elbL", "handL", 2.8, st.shirt, 1.6, st.skin)
-	limb.call("shR", "elbR", "handR", 2.8, st.shirt, 1.6, st.skin)
-
+	# Parts, drawn far to near: [depth, what, detail] (no closures: this runs
+	# for every figure in view, every frame it moves)
+	var parts := [
+		[(pts.hipL.z + pts.kneeL.z + pts.footL.z) / 3.0, PART_LIMB, LIMBS[0]],
+		[(pts.hipR.z + pts.kneeR.z + pts.footR.z) / 3.0, PART_LIMB, LIMBS[1]],
+		[(pts.shL.z + pts.elbL.z + pts.handL.z) / 3.0, PART_LIMB, LIMBS[2]],
+		[(pts.shR.z + pts.elbR.z + pts.handR.z) / 3.0, PART_LIMB, LIMBS[3]],
+	]
 	var torso_depth: float = (pts.shL.z + pts.shR.z + pts.hipL.z + pts.hipR.z) / 4
-	parts.append([torso_depth, func() -> void: _draw_torso(pts)])
+	parts.append([torso_depth, PART_TORSO, null])
 	if _has_extra("quiver"):
-		parts.append([torso_depth - 2 * k * sin(facing), func() -> void:
-			var x: float = (pts.shL.x + pts.shR.x) / 2 - cos(facing) * 3 * k
-			var y: float = (pts.shL.y + pts.shR.y) / 2 - sin(facing) * 1.5 * k
-			draw_rect(Rect2(x - 2 * k, y - 2 * k, 4 * k, 9 * k), Color("#6e4a28"))
-			draw_line(Vector2(x - 1 * k, y - 2 * k), Vector2(x - 1.5 * k, y - 5 * k), Color("#e8e0c8"), 1.0)
-			draw_line(Vector2(x + 1 * k, y - 2 * k), Vector2(x + 1.5 * k, y - 5 * k), Color("#e8e0c8"), 1.0)])
-	parts.append([pts.head.z + 0.01, func() -> void: _draw_head(_xy(pts.head))])
+		parts.append([torso_depth - 2 * k * sin(facing), PART_QUIVER, null])
+	parts.append([pts.head.z + 0.01, PART_HEAD, null])
 	if weapon_line:
-		parts.append([pts.handR.z + 0.02, weapon_line])
+		parts.append([pts.handR.z + 0.02, PART_WEAPON, weapon_line])
 	var off: Variant = null
 	if offhand:
 		off = ragdoll.offhand if ragdoll else offhand
 	if off:
-		parts.append([pts.handL.z + 0.02, func() -> void: _draw_offhand(pts, off)])
-
+		parts.append([pts.handL.z + 0.02, PART_OFFHAND, off])
 	for s in stuck:
 		var d: float = lerpf(pts[s.a].z, pts[s.b].z, s.t) - sin(facing + s.rel) * 2
-		parts.append([d, func() -> void: _draw_shaft(pts, s)])
+		parts.append([d, PART_SHAFT, s])
 
-	parts.sort_custom(func(p, q): return p[0] < q[0])
-	for p in parts:
-		p[1].call()
+	parts.sort_custom(_nearer)
+	for part in parts:
+		match part[1]:
+			PART_LIMB:
+				var limb: Array = part[2]
+				var end: Vector3 = pts[limb[2]]
+				_round_line(PackedVector2Array([_xy(pts[limb[0]]), _xy(pts[limb[1]]), _xy(end)]), limb[3] * k, st[limb[4]])
+				Draw.circle(self, _xy(end), limb[5] * k, st[limb[6]])
+			PART_TORSO:
+				_draw_torso(pts)
+			PART_QUIVER:
+				var x: float = (pts.shL.x + pts.shR.x) / 2 - cos(facing) * 3 * k
+				var y: float = (pts.shL.y + pts.shR.y) / 2 - sin(facing) * 1.5 * k
+				draw_rect(Rect2(x - 2 * k, y - 2 * k, 4 * k, 9 * k), QUIVER)
+				draw_line(Vector2(x - 1 * k, y - 2 * k), Vector2(x - 1.5 * k, y - 5 * k), FLETCH, 1.0)
+				draw_line(Vector2(x + 1 * k, y - 2 * k), Vector2(x + 1.5 * k, y - 5 * k), FLETCH, 1.0)
+			PART_HEAD:
+				_draw_head(_xy(pts.head))
+			PART_WEAPON:
+				_draw_weapon(part[2])
+			PART_OFFHAND:
+				_draw_offhand(pts, part[2])
+			PART_SHAFT:
+				_draw_shaft(pts, part[2])
+
+
+static func _nearer(p: Array, q: Array) -> bool:
+	return p[0] < q[0]
 
 
 func _draw_torso(pts: Dictionary) -> void:
@@ -507,11 +586,11 @@ func _draw_torso(pts: Dictionary) -> void:
 	_line((hip_l + hip_r) / 2, neck, 8 * k, st.shirt)
 	_poly([sh_l, sh_r, hip_r, hip_l], st.shirt)
 	# Belt
-	_line(hip_l, hip_r, 2 * k, Color("#2b221c"))
+	_line(hip_l, hip_r, 2 * k, C_2B221C)
 	if _has_extra("apron"):
 		var lo := func(p: Vector2, t: float) -> Vector2:
 			return Vector2(lerpf(neck.x, p.x, t), lerpf(neck.y, p.y, t) + 4 * k * t)
-		_poly([sh_l.lerp(hip_l, 0.4), sh_r.lerp(hip_r, 0.4), lo.call(hip_r, 1.15), lo.call(hip_l, 1.15)], st.get("apron", Color("#d8cfb4")))
+		_poly([sh_l.lerp(hip_l, 0.4), sh_r.lerp(hip_r, 0.4), lo.call(hip_r, 1.15), lo.call(hip_l, 1.15)], st.get("apron", C_D8CFB4))
 	if _has_extra("cape"):
 		var cape: Color = st.cape_colour
 		cape.a = 0.9
@@ -520,7 +599,7 @@ func _draw_torso(pts: Dictionary) -> void:
 
 # A filled polygon, skipping slivers that can't be triangulated.
 func _poly(pts: Array, colour: Color) -> void:
-	Sketch.fill(self, PackedVector2Array(pts), colour)
+	Draw.convex(self, PackedVector2Array(pts), colour)
 
 
 func _draw_head(at: Vector2) -> void:
@@ -531,50 +610,50 @@ func _draw_head(at: Vector2) -> void:
 	var faces_us: bool = not ragdoll and f.y > -0.25 # can we see the face?
 	var fx := f.x * r * 0.45
 	var skin: Color = st.skin
-	var ink := Color("#1c1714")
+	var ink := C_1C1714
 	if head == "goblin" or _has_extra("ears"):
 		_poly([at + Vector2(-r * 0.6, 0), at + Vector2(-r * 1.9, -r * 0.7), at + Vector2(-r * 0.4, -r * 0.3)], skin)
 		_poly([at + Vector2(r * 0.6, 0), at + Vector2(r * 1.9, -r * 0.7), at + Vector2(r * 0.4, -r * 0.3)], skin)
-	draw_circle(at, r, skin)
+	Draw.circle(self, at, r, skin)
 	var eyes := func(colour: Color, size: float) -> void:
 		if not faces_us:
 			return
 		for s in [-1.0, 1.0]:
-			draw_circle(at + Vector2(fx + s * r * 0.38 * absf(f.y), -r * 0.1), size * k, colour)
+			Draw.circle(self, at + Vector2(fx + s * r * 0.38 * absf(f.y), -r * 0.1), size * k, colour)
 	match head:
 		"straw":
 			eyes.call(ink, 0.8)
-			_ellipse(at - Vector2(0, r * 0.6), r * 1.9, r * 0.75, Color("#d4b25e"))
-			_ellipse(at - Vector2(0, r * 0.85), r * 1.0, r * 0.6, Color("#c29d48"))
+			_ellipse(at - Vector2(0, r * 0.6), r * 1.9, r * 0.75, C_D4B25E)
+			_ellipse(at - Vector2(0, r * 0.85), r * 1.0, r * 0.6, C_C29D48)
 		"hood":
-			draw_circle(at - Vector2(0, r * 0.1), r * 1.12, st.head_colour)
+			Draw.circle(self, at - Vector2(0, r * 0.1), r * 1.12, st.head_colour)
 			if faces_us:
-				draw_circle(at + Vector2(fx, r * 0.1), r * 0.7, skin)
+				Draw.circle(self, at + Vector2(fx, r * 0.1), r * 0.7, skin)
 				eyes.call(ink, 0.8)
 				if st.has("mask"):
 					draw_rect(Rect2(at.x + fx - r * 0.7, at.y + r * 0.15, r * 1.4, r * 0.45), st.mask)
 		"helm":
-			draw_circle(at - Vector2(0, r * 0.1), r * 1.12, Color("#a6aeb7"))
+			Draw.circle(self, at - Vector2(0, r * 0.1), r * 1.12, C_A6AEB7)
 			if faces_us:
 				draw_rect(Rect2(at.x + fx - r * 0.6, at.y - r * 0.15, r * 1.2, r * 0.22), ink)
-			draw_rect(Rect2(at.x - r * 0.15, at.y - r * 1.2, r * 0.3, r * 0.6), Color("#7d8590"))
+			draw_rect(Rect2(at.x - r * 0.15, at.y - r * 1.2, r * 0.3, r * 0.6), C_7D8590)
 		"hat":
 			eyes.call(ink, 0.8)
 			_ellipse(at - Vector2(0, r * 0.55), r * 2.1, r * 0.7, st.head_colour)
 			_ellipse(at - Vector2(0, r * 0.85), r * 1.0, r * 0.65, st.head_colour)
-			draw_rect(Rect2(at.x - r, at.y - r * 0.75, r * 2, r * 0.2), Color("#c9a227"))
+			draw_rect(Rect2(at.x - r, at.y - r * 0.75, r * 2, r * 0.2), C_C9A227)
 		"goblin":
-			eyes.call(Color("#ffe14d"), 1.0)
+			eyes.call(C_FFE14D, 1.0)
 		"orc":
-			eyes.call(Color("#ffcf3a"), 1.0)
+			eyes.call(C_FFCF3A, 1.0)
 			if faces_us:
 				for s in [-1.0, 1.0]:
-					_poly([at + Vector2(fx + s * r * 0.35, r * 0.35), at + Vector2(fx + s * r * 0.5, -r * 0.15), at + Vector2(fx + s * r * 0.15, r * 0.3)], Color("#efe6cf"))
-			draw_rect(Rect2(at.x - r * 0.9, at.y - r * 1.0, r * 1.8, r * 0.35), Color("#3a3620")) # brow
+					_poly([at + Vector2(fx + s * r * 0.35, r * 0.35), at + Vector2(fx + s * r * 0.5, -r * 0.15), at + Vector2(fx + s * r * 0.15, r * 0.3)], C_EFE6CF)
+			draw_rect(Rect2(at.x - r * 0.9, at.y - r * 1.0, r * 1.8, r * 0.35), C_3A3620) # brow
 		"hair":
-			draw_circle(at + Vector2(-fx * 0.4, -r * 0.25), r * 1.02, st.head_colour)
+			Draw.circle(self, at + Vector2(-fx * 0.4, -r * 0.25), r * 1.02, st.head_colour)
 			if faces_us:
-				draw_circle(at + Vector2(fx, r * 0.12), r * 0.72, skin)
+				Draw.circle(self, at + Vector2(fx, r * 0.12), r * 0.72, skin)
 				eyes.call(ink, 0.8)
 		"kerchief":
 			if faces_us:
@@ -584,9 +663,9 @@ func _draw_head(at: Vector2) -> void:
 			eyes.call(ink, 0.8)
 
 
-# Returns a Callable drawing the weapon from the hand along `dir` (screen x/y
-# on the ground plus height z).
-func _weapon_from(hand3: Vector3, dir: Vector3, fallen := false) -> Callable:
+# Where the weapon is drawn: from the hand along `dir` (screen x/y on the
+# ground plus height z). Returns what _draw_weapon needs.
+func _weapon_from(hand3: Vector3, dir: Vector3, fallen := false) -> Dictionary:
 	var kind: Variant = ragdoll.weapon if ragdoll else weapon
 	var length: float = WEAPON_LENGTH.get(kind, 3.0) * k
 	var n := dir.length()
@@ -594,49 +673,55 @@ func _weapon_from(hand3: Vector3, dir: Vector3, fallen := false) -> Callable:
 		n = 1.0
 	var ux := dir.x / n
 	var uy := (dir.y - (0.0 if fallen else dir.z)) / n
-	var hand := _xy(hand3)
-	var tip := hand + Vector2(ux, uy) * length
-	var at := func(t: float) -> Vector2: return hand + Vector2(ux, uy) * length * t
+	return {"kind": kind, "hand": _xy(hand3), "u": Vector2(ux, uy), "length": length}
+
+
+func _draw_weapon(w: Dictionary) -> void:
+	var hand: Vector2 = w.hand
+	var u: Vector2 = w.u
+	var length: float = w.length
+	var ux := u.x
+	var uy := u.y
+	var tip := hand + u * length
 	var side := Vector2(-uy, ux) # across the blade
-	return func() -> void:
-		match kind:
-			"dagger":
-				_line(hand, tip, 1.8 * k, Color("#c9c9c9"))
-			"sword":
-				_line(hand, at.call(0.15), 2.2 * k, Color("#5e3f22"))
-				_line(at.call(0.15), tip, 2.4 * k, Color("#d8dde2"))
-				_line(at.call(0.15) + side * 3.5 * k, at.call(0.15) - side * 3.5 * k, 1.8 * k, Color("#c9a227"))
-			"club":
-				_line(hand, at.call(0.5), 2.4 * k, Color("#6b4a2a"))
-				_line(at.call(0.5), tip, 4 * k, Color("#6b4a2a"))
-			"mace":
-				_line(hand, at.call(0.75), 2 * k, Color("#4a3220"))
-				draw_circle(tip, 3.2 * k, Color("#8a9096"))
-			"cleaver":
-				_line(hand, at.call(0.3), 2.6 * k, Color("#4a3220"))
-				var w := 4.5 * k
-				_poly([at.call(0.3), tip, tip + side * w, at.call(0.3) + side * w], Color("#8a9096"))
-			"spear":
-				_line(hand, tip, 1.8 * k, Color("#8b6236"))
-				_poly([tip + Vector2(ux, uy) * 5 * k, tip + side * 2.2 * k, tip - side * 2.2 * k], Color("#d8dde2"))
-				_line(hand - Vector2(ux, uy) * 6 * k, hand, 1.8 * k, Color("#8b6236"))
-			"axe":
-				_line(hand, tip, 2.2 * k, Color("#6b4a2a"))
-				var w := 4.5 * k
-				_poly([at.call(0.75), tip, tip + side * w + Vector2(ux, uy) * 2, at.call(0.75) + side * w], Color("#b9c0c8"))
+	match w.kind:
+		"dagger":
+			_line(hand, tip, 1.8 * k, C_C9C9C9)
+		"sword":
+			_line(hand, (hand + u * (length * 0.15)), 2.2 * k, C_5E3F22)
+			_line((hand + u * (length * 0.15)), tip, 2.4 * k, C_D8DDE2)
+			_line((hand + u * (length * 0.15)) + side * 3.5 * k, (hand + u * (length * 0.15)) - side * 3.5 * k, 1.8 * k, C_C9A227)
+		"club":
+			_line(hand, (hand + u * (length * 0.5)), 2.4 * k, C_6B4A2A)
+			_line((hand + u * (length * 0.5)), tip, 4 * k, C_6B4A2A)
+		"mace":
+			_line(hand, (hand + u * (length * 0.75)), 2 * k, C_4A3220)
+			Draw.circle(self, tip, 3.2 * k, C_8A9096)
+		"cleaver":
+			_line(hand, (hand + u * (length * 0.3)), 2.6 * k, C_4A3220)
+			var blade := 4.5 * k
+			_poly([(hand + u * (length * 0.3)), tip, tip + side * blade, (hand + u * (length * 0.3)) + side * blade], C_8A9096)
+		"spear":
+			_line(hand, tip, 1.8 * k, C_8B6236)
+			_poly([tip + Vector2(ux, uy) * 5 * k, tip + side * 2.2 * k, tip - side * 2.2 * k], C_D8DDE2)
+			_line(hand - Vector2(ux, uy) * 6 * k, hand, 1.8 * k, C_8B6236)
+		"axe":
+			_line(hand, tip, 2.2 * k, C_6B4A2A)
+			var blade := 4.5 * k
+			_poly([(hand + u * (length * 0.75)), tip, tip + side * blade + Vector2(ux, uy) * 2, (hand + u * (length * 0.75)) + side * blade], C_B9C0C8)
 
 
 func _draw_offhand(pts: Dictionary, kind: String) -> void:
 	var h := _xy(pts.handL)
 	var f := Vector2(cos(facing), sin(facing))
-	var string_colour := Color("#e8e0c8")
+	var string_colour := C_E8E0C8
 	if kind == "shield":
 		var c := h + Vector2(f.x * 2 * k, f.y * 1 * k)
 		var rim := Sketch.ellipse_points(c, 5.5 * k, 7 * k)
-		draw_colored_polygon(rim, Color("#6e4a28"))
+		Draw.ellipse(self, c, 5.5 * k, 7 * k, C_6E4A28)
 		rim.append(rim[0])
-		draw_polyline(rim, Color("#a6aeb7"), 1.5 * k)
-		draw_circle(c, 1.5 * k, Color("#a6aeb7"))
+		draw_polyline(rim, C_A6AEB7, 1.5 * k)
+		Draw.circle(self, c, 1.5 * k, C_A6AEB7)
 	elif kind == "bow":
 		# Held upright. While aiming, the string is drawn back with the arrow
 		# nocked (`pull` 0..1); just after a shot it shivers.
@@ -645,36 +730,38 @@ func _draw_offhand(pts: Dictionary, kind: String) -> void:
 		var top := Vector2(h.x - f.x * drawn * 1.5 * k, h.y - (10 - drawn) * k)
 		var bottom := Vector2(h.x - f.x * drawn * 1.5 * k, h.y + (8 - drawn) * k)
 		var bulge := Vector2(h.x + f.x * bend * k, h.y - 1 * k + f.y * 2 * k)
-		_round_line(_quad_curve(top, bulge, bottom), 1.8 * k, Color("#8b6236"))
+		_round_line(_quad_curve(top, bulge, bottom), 1.8 * k, C_8B6236)
 		var shiver := sin(kick * 40) * kick * 2 if kick > 0 else 0.0
 		var drawback := drawn * 9 - shiver
 		var nock := Vector2(h.x - f.x * drawback * k, h.y - 1 * k - f.y * drawback * 0.5 * k)
-		draw_polyline(PackedVector2Array([top, nock, bottom]), string_colour, 0.8)
+		draw_line(top, nock, string_colour, 0.8)
+		draw_line(nock, bottom, string_colour, 0.8)
 		if aiming and loaded and drawn > 0.1:
 			var tip := Vector2(nock.x + f.x * 14 * k, nock.y + f.y * 6 * k)
-			draw_line(nock, tip, Color("#8b6236"), 1.2 * k)
-			draw_circle(tip, 1.2 * k, Color("#d8dde2"))
+			draw_line(nock, tip, C_8B6236, 1.2 * k)
+			Draw.circle(self, tip, 1.2 * k, C_D8DDE2)
 	elif kind == "crossbow":
 		# Spanned by hauling the string back to the latch; the bolt goes on once
 		# it's cocked
-		_line(Vector2(h.x - f.x * 4 * k, h.y - f.y * 2 * k), Vector2(h.x + f.x * 9 * k, h.y + f.y * 4 * k), 3 * k, Color("#6e4a28"))
+		_line(Vector2(h.x - f.x * 4 * k, h.y - f.y * 2 * k), Vector2(h.x + f.x * 9 * k, h.y + f.y * 4 * k), 3 * k, C_6E4A28)
 		var p := Vector2(h.x + f.x * 7 * k, h.y + f.y * 3 * k)
 		var cocked := pull if aiming else 1.0
 		var s := Vector2(p.x - f.x * cocked * 6 * k, p.y - f.y * cocked * 3 * k)
 		var tip_l := Vector2(p.x - f.y * 7 * k, p.y + f.x * 3 * k - 1)
 		var tip_r := Vector2(p.x + f.y * 7 * k, p.y - f.x * 3 * k - 1)
-		_round_line(_quad_curve(tip_l, Vector2(p.x + f.x * 2 * k, p.y + f.y * 1 * k), tip_r), 2 * k, Color("#b9c0c8"))
-		draw_polyline(PackedVector2Array([tip_l, s, tip_r]), string_colour, 0.8)
+		_round_line(_quad_curve(tip_l, Vector2(p.x + f.x * 2 * k, p.y + f.y * 1 * k), tip_r), 2 * k, C_B9C0C8)
+		draw_line(tip_l, s, string_colour, 0.8)
+		draw_line(s, tip_r, string_colour, 0.8)
 		if loaded and cocked >= 1:
-			draw_line(s, Vector2(p.x + f.x * 3 * k, p.y + f.y * 1.5 * k), Color("#5e3f22"), 1.4 * k)
+			draw_line(s, Vector2(p.x + f.x * 3 * k, p.y + f.y * 1.5 * k), C_5E3F22, 1.4 * k)
 	elif kind == "sling":
 		# Whirled round the hand, faster as the throw comes
 		var r := (4 + pull * 3 if aiming else 0.0) * k
 		var p := Vector2(h.x + cos(spin) * r, h.y + (sin(spin) * r * 0.5 - 6 * k if aiming else 6 * k))
-		draw_line(h, p, Color("#c9b28a"), 0.8)
-		_ellipse(p, 2 * k, 1.6 * k, Color("#6e4a28"))
+		draw_line(h, p, C_C9B28A, 0.8)
+		_ellipse(p, 2 * k, 1.6 * k, C_6E4A28)
 		if loaded:
-			draw_circle(p, 1.2 * k, Color("#9a968c"))
+			Draw.circle(self, p, 1.2 * k, C_9A968C)
 
 
 func _draw_shaft(pts: Dictionary, s: Dictionary) -> void:
@@ -684,8 +771,8 @@ func _draw_shaft(pts: Dictionary, s: Dictionary) -> void:
 	# What shows is the back end, pointing back the way it came
 	var length := (5.0 if s.kind == "bolt" else 8.0) * k
 	var end := Vector2(p.x - dir.x * length, p.y - dir.y * length - s.tilt * length)
-	_line(p, end, 1.2 * k, Color("#5e3f22") if s.kind == "bolt" else Color("#8b6236"))
-	var feather := Color("#5e3f22") if s.kind == "bolt" else Color("#e8e0c8")
+	_line(p, end, 1.2 * k, C_5E3F22 if s.kind == "bolt" else C_8B6236)
+	var feather := C_5E3F22 if s.kind == "bolt" else C_E8E0C8
 	var nrm := Vector2(-dir.y * 1.6 * k, dir.x * 0.8 * k)
 	var back := end + dir * 2.5 * k
 	_poly([end, back + nrm, back - nrm], feather)

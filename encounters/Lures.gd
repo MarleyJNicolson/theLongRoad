@@ -19,7 +19,7 @@ static func goblin(b: Build) -> Variant:
 
 
 static func _lure(b: Build, faction: String) -> Variant:
-	var spot: Variant = b.set_back(Road.ROAD_WIDTH / 2 + 160, 140, true, 260)
+	var spot: Variant = b.set_back(Road.ROAD_WIDTH / 2 + 160, 140, true, 520) # (260 in the JS)
 	if spot == null:
 		return null
 	var c := Vector2(spot.x, spot.y)

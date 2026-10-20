@@ -2,7 +2,9 @@ class_name Sketch
 extends Node2D
 
 # A recorded drawing, the stand-in for a Pixi Graphics: shapes are added once
-# (fills, strokes, circles, ellipses) and replayed in _draw. Most props are
+# (fills, strokes, circles, ellipses) and replayed in _draw. Circles, ellipses
+# and convex shapes go through Draw, which is far cheaper than Godot's polygon
+# drawing; only general polygons (poly) are triangulated. Most props are
 # drawn once at creation and never change; call clear() and draw again to
 # change one (e.g. a chest opening).
 
@@ -53,7 +55,16 @@ func circle(c: Vector2, r: float, colour: Color) -> Sketch:
 
 # rx, ry are radii, as in Pixi's ellipse().
 func ellipse(c: Vector2, rx: float, ry: float, colour: Color) -> Sketch:
-	return poly(ellipse_points(c, rx, ry), colour)
+	_ops.append([&"ellipse", c, rx, ry, colour])
+	queue_redraw()
+	return self
+
+
+# A polygon known to be convex (a face of a solid): drawn more cheaply.
+func convex(pts: PackedVector2Array, colour: Color) -> Sketch:
+	_ops.append([&"convex", pts, colour])
+	queue_redraw()
+	return self
 
 
 func ellipse_stroke(c: Vector2, rx: float, ry: float, width: float, colour: Color) -> Sketch:
@@ -63,7 +74,7 @@ func ellipse_stroke(c: Vector2, rx: float, ry: float, width: float, colour: Colo
 # A thick line with round ends (a stroke with cap: 'round'), as one shape, so
 # a translucent one doesn't darken where the caps overlap.
 func capsule(a: Vector2, b: Vector2, width: float, colour: Color) -> Sketch:
-	return poly(capsule_points(a, b, width), colour)
+	return convex(capsule_points(a, b, width), colour)
 
 
 # Triangles (`indices` into `points`), optionally textured with `texture`
@@ -122,12 +133,7 @@ static func quad_curve(a: Vector2, control: Vector2, b: Vector2, steps := 8) -> 
 # A thick polyline with round caps and joins, drawn on `ci` (from its _draw).
 # Translucent lines skip the round bits, which would show as darker dots.
 static func round_line(ci: CanvasItem, points: PackedVector2Array, width: float, colour: Color) -> void:
-	if points.size() < 2:
-		return
-	ci.draw_polyline(points, colour, width)
-	if colour.a >= 1.0:
-		for p in points:
-			ci.draw_circle(p, width / 2, colour)
+	Draw.round_line(ci, points, width, colour)
 
 
 func _draw() -> void:
@@ -136,9 +142,15 @@ func _draw() -> void:
 			&"poly":
 				fill(self, op[1], op[2])
 			&"stroke":
-				draw_polyline(op[1], op[3], op[2])
+				var line: PackedVector2Array = op[1]
+				for n in line.size() - 1:
+					draw_line(line[n], line[n + 1], op[3], op[2])
 			&"circle":
-				draw_circle(op[1], op[2], op[3])
+				Draw.circle(self, op[1], op[2], op[3])
+			&"ellipse":
+				Draw.ellipse(self, op[1], op[2], op[3], op[4])
+			&"convex":
+				Draw.convex(self, op[1], op[2])
 			&"round":
 				round_line(self, op[1], op[2], op[3])
 			&"tris":

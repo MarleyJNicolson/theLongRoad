@@ -6,7 +6,7 @@ extends RefCounted
 
 # How often a camp or homestead is set back off in the wilds rather than
 # beside the road, and how much likelier a chest is out there.
-const DEEP_CHANCE := 0.45
+const DEEP_CHANCE := 0.5 # (0.45 in the JS)
 const DEEP_CHEST_CHANCE := 0.9
 
 var layer: Node2D # this encounter's ground view (in the flat props layer)
@@ -118,7 +118,7 @@ func side_that_fits(offset: float) -> float:
 # Often it's further off, out of sight in the wilds (`deep`), found by a
 # footpath, a column of smoke or a marker by the road. Null if nothing fits:
 # { side, offset, deep, x, y }.
-func set_back(near: float, radius: float, deep_only := false, far := 380.0) -> Variant:
+func set_back(near: float, radius: float, deep_only := false, far := 700.0) -> Variant: # (far was 380 in the JS)
 	var go_deep := deep_only or randf() < DEEP_CHANCE
 	var tries := []
 	if go_deep:

@@ -21,8 +21,8 @@ const MOUNT_REACH := 48.0 # how close to the cart to climb back on
 const TOAST_TIME := 1.8
 # On foot you can't stray too far from the cart: a warning past WARN_DISTANCE
 # and no further than LEASH (px)
-const WARN_DISTANCE := 700.0
-const LEASH := 860.0
+const WARN_DISTANCE := 1300.0 # (700 in the JS)
+const LEASH := 1500.0 # (860 in the JS)
 # The peasant's own stamina (the horse has its own): sprinting drains it, a
 # dash takes a chunk at once, and it comes back after a short rest.
 const SPRINT_DRAIN := 1.0 / 4.5 # a full bar lasts 4.5 s of sprinting
@@ -277,7 +277,9 @@ func _process(delta: float) -> void:
 			reset()
 		return
 	time += dt
+	_mark("")
 	_update_sky(dt)
+	_mark("sky")
 	if debug_autoaim:
 		_debug_aim()
 	if debug_goto and time > 0.3:
@@ -304,6 +306,7 @@ func _process(delta: float) -> void:
 	_update_puffs(dt)
 	var obstacles := scenery.obstacles() + encounters.obstacles()
 	interaction = _interaction()
+	_mark("obstacles")
 	if Controls.pressed("interact") and interaction:
 		interaction.act.call()
 	if Controls.pressed("bag"):
@@ -321,10 +324,12 @@ func _process(delta: float) -> void:
 	if Controls.pressed("swap") or (Controls.pressed("swap_click") and not pointer_over_ui):
 		swap_weapon()
 
+	_mark("input")
 	var near := road.nearest(cart.x, cart.y, road_index)
 	road_index = near.index
 	var on_main_road: bool = near.dist < Road.ROAD_WIDTH / 2 + 4
 	var on_road := on_main_road or encounters.on_side_road(Vector2(cart.x, cart.y))
+	_mark("road.nearest")
 
 	cart.update(dt, {} if on_foot else keys, on_road, obstacles, on_foot)
 	if on_foot:
@@ -336,6 +341,7 @@ func _process(delta: float) -> void:
 			_puff(peasant.position)
 	else:
 		sprinting = false
+	_mark("cart+peasant")
 
 	if on_main_road:
 		best = maxf(best, near.along)
@@ -343,19 +349,24 @@ func _process(delta: float) -> void:
 
 	road.ensure_ahead(road_index)
 	road.cull(road_index)
+	_mark("road")
 	encounters.place()
-	scenery.update(road_index, 3)
+	_mark("encounters.place")
+	scenery.update(road_index, 1) # (one stretch a frame: the road only needs ~8 a second)
+	_mark("scenery.update")
 
 	var from := player()
 	_update_throwing(dt, from)
 	Enemies.safe_zones = encounters.towns().map(func(t: Dictionary) -> Vector3: return t.safe)
 	encounters.update(dt, from, road_index)
+	_mark("encounters.update")
 	var here: Variant = encounters.town_at(Vector2(from.x, from.y))
 	if here and here != town:
 		_arrive(here)
 	town = here
-	war_bands.update(dt, DayNight.is_night(clock), Vector2(from.x, from.y), road_index, metres,
-		encounters.towns().map(func(t: Dictionary) -> Vector3: return t.safe))
+	war_bands.update(dt, DayNight.is_night(clock), {"pos": Vector2(from.x, from.y), "on_cart": not on_foot, "sprinting": sprinting},
+		road_index, metres, encounters.towns().map(func(t: Dictionary) -> Vector3: return t.safe))
+	_mark("war_bands")
 	# On foot, the cart is just in the way and raiders go round it.
 	var bodies := []
 	for b in cart.bodies():
@@ -367,6 +378,7 @@ func _process(delta: float) -> void:
 	# cart while you ride.
 	var targets: Array = [Vector3(peasant.position.x, peasant.position.y, Peasant.RADIUS)] if on_foot else Array(cart.bodies())
 	var fight := enemies.update(dt, from, bodies, on_foot, targets)
+	_mark("enemies")
 	for v in fight.volleys:
 		enemy_arrows.fire(v)
 	for b in fight.blows:
@@ -375,8 +387,10 @@ func _process(delta: float) -> void:
 		hurt(h.damage, h.faction, true)
 	for e in missiles.update(dt, enemies.list):
 		_on_kill(e)
+	_mark("arrows+missiles")
 	_update_melee(dt, from)
 	_update_held_weapon(dt)
+	_mark("melee+held")
 	for reward in encounters.rewards:
 		gold += reward.gold
 		scatter("coin", reward.gold, reward.x, reward.y)
@@ -384,20 +398,52 @@ func _process(delta: float) -> void:
 	encounters.rewards.clear()
 	_update_pickups(dt)
 	_update_attacks(dt)
+	_mark("pickups+attacks")
 
 	interaction = _interaction()
 	marker.queue_redraw()
+	_mark("interaction")
 
 	_update_stage(dt)
 	# Trees between you and the camera fade so you can see yourself
 	var me := player()
 	scenery.fade_around(me.x, me.y)
 	encounters.fade_around(me.x, me.y)
+	_mark("stage+fade")
 	update_camera(dt)
+	_mark("camera")
 	if toast:
 		toast.t -= dt
 		if toast.t <= 0:
 			toast = null
+
+
+# Debug (`--prof`): how long each stage of the frame takes, averaged and
+# printed every few seconds.
+var _prof_on := "--prof" in OS.get_cmdline_user_args()
+var _prof := {}
+var _prof_last := 0
+var _prof_frames := 0
+var _prof_print := 0.0
+
+
+func _mark(stage: String) -> void:
+	if not _prof_on:
+		return
+	var now := Time.get_ticks_usec()
+	if stage == "":
+		_prof_frames += 1
+		if time > _prof_print + 5:
+			_prof_print = time
+			var parts := []
+			for k in _prof:
+				parts.append("%s %.2f" % [k, _prof[k] / 1000.0 / maxi(1, _prof_frames)])
+			print("ms/frame: ", ", ".join(parts))
+			_prof.clear()
+			_prof_frames = 0
+	else:
+		_prof[stage] = _prof.get(stage, 0) + now - _prof_last
+	_prof_last = now
 
 
 func say(text: String, extra := 0.0) -> void:
@@ -954,7 +1000,7 @@ func _draw_aim(ci: CanvasItem) -> void:
 	var dot := Color("#fff4d6", 0.55 if _aim_state.loaded else 0.15)
 	var k := 30.0
 	while k < reach:
-		ci.draw_circle(from + u * k, 1.8, dot)
+		Draw.circle(ci, from + u * k, 1.8, dot)
 		k += 18
 	ci.draw_arc(from + u * reach, 7, 0, TAU, 20, Color("#fff4d6", 0.7), 1.5)
 
@@ -1550,6 +1596,8 @@ func update_camera(dt: float) -> void:
 	# Snap to whole art pixels so the picture doesn't shimmer as it scrolls.
 	var origin := (half - cam * zoom + Vector2(randf() - 0.5, randf() - 0.5) * jolt).round()
 	get_viewport().canvas_transform = Transform2D(0.0, Vector2(zoom, zoom), 0.0, origin)
+	# What's in view (with room for a raider's height and a weapon's reach)
+	Rig.view = Rect2(-origin / zoom, half * 2 / zoom).grow(120)
 
 	# Cover the view with grass, anchored to world coordinates.
 	var top_left := (-origin / zoom - Vector2(8, 8)).floor()
