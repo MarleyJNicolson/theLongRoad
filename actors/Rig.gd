@@ -115,7 +115,8 @@ var facing := PI / 2
 var phase := randf() * TAU
 var speed := 0.0
 var weapon: Variant = null # dagger, club, sword, cleaver, mace, spear, axe (or null: fists)
-var offhand: Variant = null # bow, crossbow, sling, shield
+var offhand: Variant = null # bow, crossbow, sling, shield, horn
+var blowing := 0.0 # a war horn raised to the lips (0..1)
 var loaded := true # an arrow nocked on the bow
 var aiming := false
 var pull := 0.0 # how far the bow (or crossbow) string is drawn back, 0..1
@@ -311,7 +312,7 @@ func update(dt: float, facing_: float, speed_: float) -> void:
 	# Unchanged since it was last drawn (someone standing about): leave it be.
 	# Drawing a figure is the dear part, and most of them are idle.
 	if not ragdoll:
-		var look := [facing, phase if speed > 0.5 else -1.0, flinch, kick, pull, spin, wave, lean, aiming, loaded,
+		var look := [facing, phase if speed > 0.5 else -1.0, flinch, kick, pull, spin, wave, lean, aiming, loaded, blowing,
 			weapon, offhand, seated, stuck.size(), move.t if move else -1.0,
 			str(strike.phase) + str(strike.p) if strike else ""]
 		if look == _last_look:
@@ -842,6 +843,29 @@ func _draw_offhand(pts: Dictionary, kind: String) -> void:
 		draw_line(s, tip_r, string_colour, 0.8)
 		if loaded and cocked >= 1:
 			draw_line(s, Vector2(p.x + f.x * 3 * k, p.y + f.y * 1.5 * k), C_5E3F22, 1.4 * k)
+	elif kind == "horn":
+		# A great curved war horn: carried low in the hand, or raised to the
+		# lips with the bell up and out when it's to be blown
+		var base: Vector2
+		var bend: Vector2
+		var bell: Vector2
+		if blowing > 0 and not ragdoll:
+			base = _xy(pts.head) + Vector2(f.x * 3 * k, 2 * k)
+			bend = base + Vector2(f.x * 9 * k, f.y * 3 * k + 3 * k)
+			bell = base + Vector2(f.x * 14 * k, f.y * 5 * k - 8 * k)
+		else:
+			base = h + Vector2(-f.x * 3 * k, -3 * k)
+			bend = h + Vector2(f.x * 3 * k, 6 * k)
+			bell = h + Vector2(f.x * 10 * k, f.y * 3 * k + 2 * k)
+		var curve := _quad_curve(base, bend, bell)
+		for i in curve.size() - 1:
+			var w := (1.2 + 3.2 * float(i) / (curve.size() - 1)) * k
+			_line(curve[i], curve[i + 1], w, C_D8CFB4)
+		for t in [0.35, 0.7]: # bronze bands
+			var at := curve[roundi(t * (curve.size() - 1))]
+			Draw.circle(self, at, (1.4 + 3.2 * t) * k * 0.5, C_C29D48)
+		Draw.circle(self, bell, 2.2 * k, C_C29D48)
+		Draw.circle(self, bell, 1.4 * k, C_2B221C)
 	elif kind == "sling":
 		# Whirled round the hand, faster as the throw comes
 		var r := (4 + pull * 3 if aiming else 0.0) * k

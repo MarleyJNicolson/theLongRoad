@@ -23,6 +23,10 @@ const TYPES := {
 	# damage they deal.
 	"orc": {"hp": 7, "speed": 118.0, "radius": 17.0, "health_bar": true, "leash": 1500.0, "heavy": 1, "faction": "goblin"},
 	"brute": {"hp": 6, "speed": 100.0, "radius": 15.0, "health_bar": true, "leash": 1600.0, "heavy": 1, "armour": 1, "faction": "bandit"},
+	# With a night war band: spotted, they stop and raise a war horn, and if
+	# it sounds a horde comes (see WarBands)
+	"hornblower": {"hp": 3, "speed": 115.0, "radius": 13.0, "health_bar": true, "leash": 1500.0, "faction": "bandit"},
+	"goblinHorn": {"hp": 3, "speed": 145.0, "radius": 11.0, "health_bar": true, "leash": 1300.0, "faction": "goblin"},
 }
 
 # How each raider looks: build, clothes, head and what they carry.
@@ -34,6 +38,8 @@ const LOOKS := {
 	"captain": {"scale": 1.12, "skin": "#c9a27a", "shirt": "#3d2e26", "legs": "#2a1f14", "head": "hat", "head_colour": "#2a1f14", "weapon": "sword", "extras": ["cape"], "cape_colour": "#7a1f1a"},
 	"brute": {"scale": 1.1, "skin": "#c9a27a", "shirt": "#7d8590", "legs": "#575f6b", "boots": "#3c424d", "head": "helm", "weapon": "mace", "offhand": "shield"},
 	"orc": {"scale": 1.35, "skin": "#5f7a4a", "shirt": "#4a3a2a", "legs": "#3d2f25", "head": "orc", "weapon": "cleaver"},
+	"hornblower": {"scale": 1.08, "skin": "#c9a27a", "shirt": "#5a4630", "legs": "#3a2f26", "head": "hood", "head_colour": "#4a3b30", "offhand": "horn", "extras": ["cape"], "cape_colour": "#6b5a44"},
+	"goblinHorn": {"scale": 0.85, "skin": "#6fa83a", "shirt": "#5b4a2a", "legs": "#4a3a22", "head": "goblin", "offhand": "horn", "extras": ["cape"], "cape_colour": "#4a3a22"},
 }
 
 const HIT_TINT := Color("#ff7766")
@@ -58,6 +64,8 @@ const ATTACKS := {
 	"brute": {"windup": 0.45, "swing": 0.2, "cooldown": 1.4}, # mace
 	"archer": {"windup": 0.3, "swing": 0.14, "cooldown": 1.1}, # a punch
 	"goblinArcher": {"windup": 0.25, "swing": 0.13, "cooldown": 1.0},
+	"hornblower": {"windup": 0.3, "swing": 0.14, "cooldown": 1.1}, # a punch
+	"goblinHorn": {"windup": 0.25, "swing": 0.13, "cooldown": 1.0},
 }
 const RECOVER := 0.2 # seconds to bring the arm back
 # Archers fight hand to hand inside this distance (from their edge), and go
@@ -102,6 +110,7 @@ var removed := false # cleared away (its camp left far behind)
 var slide_side := 0
 var held := 0.0 # time waiting for its next update (see Enemies.update)
 var shield_hp := 0 # what's left of a shield (0: none)
+var rooted := false # standing their ground (a hornblower winding up to blow)
 var block_flash := 0.0
 
 var rig: Rig
@@ -147,6 +156,8 @@ func _init(type_: String, x: float, y: float, home_: Dictionary, threat: Variant
 	rig = Rig.new(look)
 	rig.facing = facing
 	rig.use_sprites = true # crowds draw from baked sheets (see SpriteBank)
+	if look.get("offhand") == "horn":
+		rig.use_sprites = false # (the horn is raised to blow it: drawn live)
 	if look.get("offhand") == "shield":
 		shield_hp = 6 + (threat.hp_bonus if threat else 0)
 		speed *= SHIELD_SLOW
@@ -420,6 +431,9 @@ func seek(dt: float, tx: float, ty: float, top: float, arrive := false, keep_fac
 	var k := 1.0 - exp(-dt * 5)
 	vx += (d.x / dist * want - vx) * k
 	vy += (d.y / dist * want - vy) * k
+	if rooted:
+		vx = 0.0
+		vy = 0.0
 	position += Vector2(vx, vy) * dt
 	if not keep_facing:
 		var moving := Vector2(vx, vy).length()

@@ -30,12 +30,22 @@ const NOTICE := 0.9 # seconds of being seen before they come for you
 const FORGET := 8.0 # seconds out of their sight before they give up
 const MEADOWS_SIGHT := 0.7 # the Meadows: shorter sight
 
+# War horns: from the Darkwood on, some bands carry a hornblower. Once they've
+# seen you, the horn is raised; kill the hornblower within HORN_TIME or it
+# sounds and a horde closes in from all round.
+const HORN_FROM := 2500.0 # metres (the Darkwood)
+const HORN_CHANCE := 0.45
+const HORN_TIME := 5.0
+const HORDE_RING := Vector2(650, 950) # px from you that the horde comes in from
+
 var enemies: Enemies
 var road: Road
 # { members, leader, home (shared), route, leg, ahead, heading, engaged,
 #   suspicion, lost, query (the "?") }
 var bands: Array = []
 var timer := FIRST_DELAY
+var messages: Array = [] # things to tell you (Game shows them)
+var jolt := 0.0 # a shake of the screen, asked for (the horn)
 
 
 func _init(enemies_: Enemies, road_: Road) -> void:
@@ -73,6 +83,7 @@ func update(dt: float, night: bool, me: Dictionary, road_index: int, metres: flo
 		if living.is_empty():
 			continue
 		if band.engaged:
+			_update_horn(band, dt, me.pos, metres)
 			# Hunting: until they've lost you for long enough
 			var near := living.any(func(m: Enemy) -> bool: return m.position.distance_to(me.pos) < sight * 1.5)
 			band.lost = 0.0 if near and not safe else band.lost + dt
@@ -154,6 +165,78 @@ func _engage(band: Dictionary) -> void:
 	band.query.visible = false
 	for m: Enemy in band.members:
 		m.engage()
+	# The horn goes up
+	var horn: Variant = band.get("horn")
+	if horn != null and horn.alive() and band.horn_t < 0 and band.blast == null:
+		band.horn_t = HORN_TIME
+		horn.rooted = true
+		horn.rig.blowing = 1.0
+		band.horn_ring.visible = true
+		messages.append("A war horn is raised! Kill the hornblower before it sounds")
+
+
+# The horn's count: it sounds unless the hornblower is cut down first.
+func _update_horn(band: Dictionary, dt: float, me: Vector2, metres: float) -> void:
+	var horn: Variant = band.get("horn")
+	if band.blast_t > 0:
+		# The blast rolling out
+		band.blast_t -= dt
+		var wave: Variant = band.blast
+		if is_instance_valid(wave):
+			var t: float = 1.0 - band.blast_t / 1.4
+			wave.scale = Vector2.ONE * (1 + t * 14)
+			wave.modulate.a = 1 - t
+		if band.blast_t <= 0:
+			if is_instance_valid(wave):
+				wave.queue_free()
+			if horn != null and is_instance_valid(horn):
+				horn.rig.blowing = 0.0
+				horn.rooted = false
+		return
+	if horn == null or band.horn_t < 0:
+		return
+	if not horn.alive():
+		band.horn_t = -1.0
+		band.horn = null
+		band.horn_ring.visible = false
+		messages.append("The hornblower falls – the horn is silent")
+		return
+	horn.facing = (me - horn.position).angle()
+	band.horn_t -= dt
+	band.horn_ring.queue_redraw()
+	if band.horn_t <= 0:
+		_sound_horn(band, me, metres)
+
+
+func _sound_horn(band: Dictionary, me: Vector2, metres: float) -> void:
+	var horn: Enemy = band.horn
+	band.horn_t = -1.0
+	band.horn_ring.visible = false
+	band.blast_t = 1.4
+	var wave := Sketch.new()
+	wave.ellipse_stroke(Vector2.ZERO, 20, 10, 2.5, Color("#f6c25a"))
+	wave.position = Vector2(0, -6)
+	horn.add_child(wave)
+	band.blast = wave
+	jolt = 0.6
+	messages.append("The war horn sounds! A horde is coming")
+	# The horde: from all round, out of sight, straight for you
+	var km := metres / 1000.0
+	var threat := Threat.threat_at(metres)
+	var count := mini(60, 18 + floori(km * 3))
+	var small := "goblin" if horn.faction == "goblin" else "bandit"
+	var heavy := "orc" if horn.faction == "goblin" else "brute"
+	var archer := "goblinArcher" if horn.faction == "goblin" else "archer"
+	var types := []
+	for k in count:
+		types.append(heavy if k % 7 == 3 else (archer if k % 5 == 1 else small))
+	var horde := _make_band(me, types, threat, [me], false)
+	horde.engaged = true
+	for m: Enemy in horde.members:
+		m.position = me + Vector2.from_angle(randf() * TAU) * randf_range(HORDE_RING.x, HORDE_RING.y)
+		m.leash = HUNT_LEASH + 1000
+		m.engage()
+	bands.append(horde)
 
 
 # Lost you: back to the patrol, from wherever they've got to.
@@ -230,6 +313,15 @@ func _spawn(player: Vector2, road_index: int, metres: float, towns: Array, meado
 	if faction == "bandit" and km > 2:
 		types[0] = "captain" # someone has to lead them
 
+	# Some carry a war horn
+	if metres >= HORN_FROM and not meadows and randf() < HORN_CHANCE:
+		types[types.size() - 1] = "goblinHorn" if faction == "goblin" else "hornblower"
+	bands.append(_make_band(at, types, threat, route, true))
+
+
+# Stand a band up at `at`: the members round a shared home, the first of them
+# leading (with a torch, if `torch_lit`). Returns the band (not yet added).
+func _make_band(at: Vector2, types: Array, threat: Dictionary, route: Array, torch_lit: bool) -> Dictionary:
 	var home := {"x": at.x, "y": at.y, "wander": {"x": at.x, "y": at.y, "min": 8.0, "max": 34.0}}
 	var members := []
 	var before: Variant = enemies.threat
@@ -246,14 +338,16 @@ func _spawn(player: Vector2, road_index: int, metres: float, towns: Array, meado
 	# they've noticed
 	var leader: Enemy = members[0]
 	var top := -leader.rig.height()
-	var torch := Sketch.new()
-	torch.line(Vector2(9, -14), Vector2(11, top + 4), 2, Color("#4a3220"))
-	torch.poly(PackedVector2Array([Vector2(8, top + 4), Vector2(11, top - 6), Vector2(14, top + 4)]), Color("#ee8a36"))
-	torch.poly(PackedVector2Array([Vector2(10, top + 3), Vector2(11, top - 2), Vector2(12, top + 3)]), Color("#fdf0a6"))
-	var flame := Glow.light(150, Color("#ff9a3c"), 1.1)
-	flame.position = Vector2(11, top)
-	torch.add_child(flame)
-	leader.figure.add_child(torch)
+	var torch: Variant = null
+	if torch_lit:
+		torch = Sketch.new()
+		torch.line(Vector2(9, -14), Vector2(11, top + 4), 2, Color("#4a3220"))
+		torch.poly(PackedVector2Array([Vector2(8, top + 4), Vector2(11, top - 6), Vector2(14, top + 4)]), Color("#ee8a36"))
+		torch.poly(PackedVector2Array([Vector2(10, top + 3), Vector2(11, top - 2), Vector2(12, top + 3)]), Color("#fdf0a6"))
+		var flame := Glow.light(150, Color("#ff9a3c"), 1.1)
+		flame.position = Vector2(11, top)
+		torch.add_child(flame)
+		leader.figure.add_child(torch)
 	var query := Fonts.world_label("?", Vector2.ZERO, 22, Color("#f6c25a"))
 	var holder := Node2D.new() # (scaled about the "?" itself)
 	holder.position = Vector2(0, top - 22)
@@ -261,6 +355,32 @@ func _spawn(player: Vector2, road_index: int, metres: float, towns: Array, meado
 	holder.visible = false
 	leader.add_child(holder)
 
-	bands.append({"members": members, "leader": leader, "home": home, "route": route, "leg": 1, "ahead": 1,
-		"heading": (route[1] - route[0]).angle(), "engaged": false, "suspicion": 0.0, "lost": 0.0, "query": holder,
-		"torch": torch})
+	var band := {"members": members, "leader": leader, "home": home, "route": route, "leg": mini(1, route.size() - 1), "ahead": 1,
+		"heading": (route[1] - route[0]).angle() if route.size() > 1 else 0.0, "engaged": false, "suspicion": 0.0, "lost": 0.0,
+		"query": holder, "torch": torch, "horn": null, "horn_t": -1.0, "horn_ring": null, "blast_t": 0.0, "blast": null}
+	# A hornblower: the count to the blast shows as a ring filling over their head
+	for m: Enemy in members:
+		if m.type == "hornblower" or m.type == "goblinHorn":
+			band.horn = m
+			var ring := Painter.new(func(ci: CanvasItem) -> void:
+				var left: float = clampf(band.horn_t / HORN_TIME, 0, 1)
+				var c := Vector2(0, -m.rig.height() - 16)
+				Draw.circle(ci, c, 8, Color(0, 0, 0, 0.55))
+				ci.draw_arc(c, 6.5, -PI / 2, -PI / 2 + TAU * (1 - left), 24, Color("#e0463a"), 2.5, true)
+				ci.draw_arc(c, 6.5, -PI / 2 + TAU * (1 - left), -PI / 2 + TAU, 24, Color("#f6c25a", 0.35), 2.5, true))
+			ring.visible = false
+			m.add_child(ring)
+			band.horn_ring = ring
+			break
+	return band
+
+
+# Debug: a band with a hornblower right by you, already on to you.
+func debug_horn_band(me: Vector2, metres: float) -> void:
+	var faction := "goblin" if randf() < 0.5 else "bandit"
+	var small := "goblin" if faction == "goblin" else "bandit"
+	var types := [small, small, small, "goblinHorn" if faction == "goblin" else "hornblower"]
+	var at := me + Vector2.from_angle(randf() * TAU) * 260
+	var band := _make_band(at, types, Threat.threat_at(maxf(metres, HORN_FROM)), [at], true)
+	bands.append(band)
+	_engage(band)

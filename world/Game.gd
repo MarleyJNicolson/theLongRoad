@@ -392,6 +392,12 @@ func _process(delta: float) -> void:
 	town = here
 	war_bands.update(dt, DayNight.is_night(clock), {"pos": Vector2(from.x, from.y), "on_cart": not on_foot, "sprinting": sprinting},
 		road_index, metres, encounters.towns().map(func(t: Dictionary) -> Vector3: return t.safe))
+	for message in war_bands.messages:
+		say(message)
+	war_bands.messages.clear()
+	if war_bands.jolt > 0:
+		shake = maxf(shake, war_bands.jolt)
+		war_bands.jolt = 0.0
 	_mark("war_bands")
 	# On foot, the cart is just in the way and raiders go round it.
 	var bodies := []
@@ -1707,6 +1713,9 @@ func debug_key(event: InputEvent) -> void:
 		debug_spawn()
 	elif event.keycode == KEY_F5:
 		debug_wave(300)
+	elif event.keycode == KEY_F11:
+		war_bands.debug_horn_band(Vector2(player().x, player().y), metres)
+		say("Debug: a war band with a hornblower")
 	elif event.keycode == KEY_F9:
 		debug_next_town()
 	elif event.keycode == KEY_F10:
