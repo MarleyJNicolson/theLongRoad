@@ -14,11 +14,17 @@ const STAIN_TIME := 25.0 # seconds a spatter lasts before it's gone
 const MAX_STAINS := 2500 # the oldest go first
 const COLOURS := [Color("#9a1414"), Color("#b01c1c"), Color("#7a0e0e")]
 const STAIN := Color("#8c1212")
+# Now and then a body, once down, spouts blood up from the neck in pulses,
+# weaker each time, like a fountain running dry
+const SPOUT_CHANCE := 0.4
+const SPOUT_TIME := Vector2(1.6, 3.2) # seconds
+const SPOUT_EVERY := 0.17 # seconds between pulses
 
 static var current: Blood # the one in play (set by Game), for whoever draws blood
 
 var drops: Array = [] # { pos: Vector2 (on the ground), z, vel: Vector3, r, colour }
 var stains: Array = [] # { pos, r, t }
+var spouts: Array = [] # { body: Enemy, t, length, next }
 var _air: Painter
 var _ground: Painter
 
@@ -34,7 +40,7 @@ func _init(ground_layer: Node2D, air_layer: Node2D) -> void:
 # the far side at chest height. More if it killed.
 func hit(at: Vector2, dir: Vector2, killed := false) -> void:
 	var d := dir.normalized() if dir != Vector2.ZERO else Vector2.RIGHT
-	for n in (randi_range(9, 14) if killed else randi_range(4, 7)):
+	for n in (randi_range(14, 20) if killed else randi_range(6, 10)):
 		var a := d.angle() + randf_range(-0.6, 0.6)
 		var speed := randf_range(50, 150)
 		_drop(at + d * 3, randf_range(11, 17), Vector3(cos(a) * speed, sin(a) * speed, randf_range(10, 70)))
@@ -44,11 +50,18 @@ func hit(at: Vector2, dir: Vector2, killed := false) -> void:
 # was travelling) and away from the blow (`dir`).
 func spray(at: Vector2, dir: Vector2, sweep: Vector2) -> void:
 	var main := (dir.normalized() * 0.5 + sweep.normalized()).normalized()
-	for n in randi_range(22, 30):
+	for n in randi_range(32, 44):
 		var a := main.angle() + randf_range(-0.55, 0.55)
 		var speed := randf_range(90, 260)
 		_drop(at, randf_range(13, 20), Vector3(cos(a) * speed, sin(a) * speed, randf_range(30, 110)))
 	hit(at, dir, true)
+
+
+# A body that's just come down: maybe it spouts (see SPOUT_CHANCE).
+func maybe_spout(body: Enemy) -> void:
+	if randf() < SPOUT_CHANCE:
+		spouts.append({"body": body, "t": 0.0, "length": randf_range(SPOUT_TIME.x, SPOUT_TIME.y), "next": 0.0,
+			"lean": Vector2.from_angle(randf() * TAU) * randf_range(8, 30)})
 
 
 func _drop(at: Vector2, z: float, vel: Vector3) -> void:
@@ -56,6 +69,7 @@ func _drop(at: Vector2, z: float, vel: Vector3) -> void:
 
 
 func update(dt: float) -> void:
+	_update_spouts(dt)
 	if not drops.is_empty():
 		var landed := false
 		for d in drops:
@@ -84,6 +98,30 @@ func update(dt: float) -> void:
 		# (fading shows a little at a time: redraw now and then, not every frame)
 		if Engine.get_process_frames() % 20 == 0 or faded:
 			_ground.queue_redraw()
+
+
+func _update_spouts(dt: float) -> void:
+	if spouts.is_empty():
+		return
+	for s in spouts:
+		s.t += dt
+		s.next -= dt
+		var body: Variant = s.body
+		if not is_instance_valid(body) or s.t > s.length or not body.rig.ragdoll:
+			s.t = INF
+			continue
+		if s.next > 0:
+			continue
+		s.next = SPOUT_EVERY * randf_range(0.8, 1.3)
+		# From the neck, straight up and a little to one side
+		var neck: Vector3 = body.rig.ragdoll.parts.neck.p
+		var at: Vector2 = body.position + Vector2(neck.x, neck.y)
+		var strength: float = 1.0 - s.t / s.length * 0.8
+		var lean: Vector2 = s.lean
+		for n in randi_range(4, 7):
+			var spread := Vector2.from_angle(randf() * TAU) * randf_range(0, 18)
+			_drop(at, neck.z + 2, Vector3(lean.x + spread.x, lean.y + spread.y, randf_range(130, 230) * strength))
+	spouts = spouts.filter(func(s: Dictionary) -> bool: return s.t <= s.length)
 
 
 func _draw_air(ci: CanvasItem) -> void:

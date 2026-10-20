@@ -36,7 +36,7 @@ func add(type: String, x: float, y: float, home: Dictionary) -> Enemy:
 	layer.add_child(enemy)
 	# Some carry a shield (more of them further along)
 	if (type == "goblin" or type == "bandit") and randf() < shield_chance():
-		enemy.give_shield(4 + (threat.hp_bonus if threat else 0))
+		enemy.give_shield(7 + (threat.hp_bonus if threat else 0))
 	list.append(enemy)
 	return enemy
 

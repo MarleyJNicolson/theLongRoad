@@ -881,10 +881,10 @@ func _draw_shaft(pts: Dictionary, s: Dictionary) -> void:
 	var ang: float = facing + s.rel
 	var dir := Vector2(cos(ang), sin(ang))
 	# What shows is the back end, pointing back the way it came
-	var length := (5.0 if s.kind == "bolt" else 8.0) * k
+	var length := (7.0 if s.kind == "bolt" else 11.0) * k
 	var end := Vector2(p.x - dir.x * length, p.y - dir.y * length - s.tilt * length)
-	_line(p, end, 1.2 * k, C_5E3F22 if s.kind == "bolt" else C_8B6236)
+	_line(p, end, 1.6 * k, C_5E3F22 if s.kind == "bolt" else C_8B6236)
 	var feather := C_5E3F22 if s.kind == "bolt" else C_E8E0C8
-	var nrm := Vector2(-dir.y * 1.6 * k, dir.x * 0.8 * k)
-	var back := end + dir * 2.5 * k
+	var nrm := Vector2(-dir.y * 2.2 * k, dir.x * 1.1 * k)
+	var back := end + dir * 3.5 * k
 	_poly([end, back + nrm, back - nrm], feather)

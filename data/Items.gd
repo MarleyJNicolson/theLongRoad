@@ -64,9 +64,9 @@ const ITEMS := [
 	# mouse button, blocks arrows and blows within `arc` degrees either side of
 	# where you aim, each block costing `cost` of your breath; or a quiver,
 	# `slots` more stacks of ammunition, drawn on first.
-	{"slot": "offhand", "icon": "shield", "kind": "shield", "name": "Wooden Buckler", "tier": 1, "arc": 50.0, "cost": 0.12},
-	{"slot": "offhand", "icon": "shield", "kind": "shield", "name": "Iron-rimmed Shield", "tier": 2, "arc": 65.0, "cost": 0.09},
-	{"slot": "offhand", "icon": "shield", "kind": "shield", "name": "Kite Shield", "tier": 3, "arc": 80.0, "cost": 0.07},
+	{"slot": "offhand", "icon": "shield", "kind": "shield", "name": "Wooden Buckler", "tier": 1, "arc": 50.0, "cost": 0.09},
+	{"slot": "offhand", "icon": "shield", "kind": "shield", "name": "Iron-rimmed Shield", "tier": 2, "arc": 65.0, "cost": 0.065},
+	{"slot": "offhand", "icon": "shield", "kind": "shield", "name": "Kite Shield", "tier": 3, "arc": 80.0, "cost": 0.05},
 	{"slot": "offhand", "icon": "quiver", "kind": "quiver", "name": "Leather Quiver", "tier": 1, "slots": 2},
 	{"slot": "offhand", "icon": "quiver", "kind": "quiver", "name": "Hunter’s Quiver", "tier": 2, "slots": 3},
 	{"slot": "offhand", "icon": "quiver", "kind": "quiver", "name": "Great Quiver", "tier": 3, "slots": 4},

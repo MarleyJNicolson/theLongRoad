@@ -12,6 +12,8 @@ const SHAFT := Color("#5e3f22")
 const HEAD := Color("#9aa3ad")
 const GOBLIN := Color("#6fa83a")
 const BANDIT := Color("#c0392b")
+const SIZE := 1.3 # drawn this much bigger than the one on the bow
+const STUCK_TIME := 8.0 # seconds one stays stuck in cover or the ground
 
 var layer: Node2D
 var list: Array = [] # { pos, dir, speed, left, damage, faction, stuck, flown }
@@ -40,7 +42,7 @@ func update(dt: float, victims: Array, obstacles: Obstacles) -> Array:
 	for a in list:
 		if a.stuck:
 			a.stuck += dt
-			if a.stuck >= 1.2:
+			if a.stuck >= STUCK_TIME:
 				keep = true # (something to clear away below)
 			continue
 		var step: float = a.speed * dt
@@ -54,14 +56,15 @@ func update(dt: float, victims: Array, obstacles: Obstacles) -> Array:
 				break
 		if hit:
 			hits.append({"damage": a.damage, "faction": a.faction, "from": a.pos - a.dir * 40})
-			a.stuck = 1.2 # gone at once
+			a.stuck = STUCK_TIME # gone at once
 			keep = true
 		elif a.left <= 0 or (a.flown > 30 and obstacles.hits(a.pos)):
-			# Drops spent, or sticks in cover (once clear of the archer's own
-			# perch, such as a watchtower), then fades.
+			# Drops spent into the ground, or sticks in cover (once clear of the
+			# archer's own perch, such as a watchtower); there it stays a while.
 			a.stuck = dt
+			a.grounded = a.left <= 0
 	if keep:
-		list = list.filter(func(a: Dictionary) -> bool: return a.stuck < 1.2)
+		list = list.filter(func(a: Dictionary) -> bool: return a.stuck < STUCK_TIME)
 	_view.queue_redraw()
 	return hits
 
@@ -70,14 +73,23 @@ func update(dt: float, victims: Array, obstacles: Obstacles) -> Array:
 # over its shadow.
 func _draw(ci: CanvasItem) -> void:
 	for a in list:
-		var alpha: float = 1.0 if not a.stuck else maxf(0.0, 1 - a.stuck / 1.2)
+		var alpha: float = 1.0 if not a.stuck else clampf((STUCK_TIME - a.stuck) / 0.8, 0, 1)
 		var p: Vector2 = a.pos
 		var d: Vector2 = a.dir
-		var n := d.orthogonal()
-		ci.draw_line(p - d * 7, p + d * 8, Color(0, 0, 0, 0.2 * alpha), 1.5)
-		var at := p - Vector2(0, 14)
-		ci.draw_line(at - d * 6.5, at + d * 6.5, Color(SHAFT, alpha), 1.3)
 		var none := PackedVector2Array()
-		ci.draw_primitive(PackedVector2Array([at + d * 9.5, at + d * 6 - n * 1.6, at + d * 6 + n * 1.6]), PackedColorArray([Color(HEAD, alpha)]), none)
 		var fletch: Color = GOBLIN if a.faction == "goblin" else BANDIT
-		ci.draw_primitive(PackedVector2Array([at - d * 6.5, at - d * 9.5 - n * 2.2, at - d * 4, at - d * 9.5 + n * 2.2]), PackedColorArray([Color(fletch, alpha)]), none)
+		if a.get("grounded", false):
+			# Stuck in the ground at a slant, the fletching up
+			var tail := p - d * 6.5 * SIZE - Vector2(0, 8 * SIZE)
+			ci.draw_line(p, tail, Color(SHAFT, alpha), 1.3 * SIZE)
+			var up := (tail - p).normalized()
+			ci.draw_primitive(PackedVector2Array([tail, tail + up * 3.5 - up.orthogonal() * 2.2, tail + up * 3.5 + up.orthogonal() * 2.2]), PackedColorArray([Color(fletch, alpha)]), none)
+			continue
+		var n := d.orthogonal() * SIZE
+		if not a.stuck:
+			ci.draw_line(p - d * 7, p + d * 8, Color(0, 0, 0, 0.2 * alpha), 1.5)
+		var at := p - Vector2(0, 14)
+		var half := 6.5 * SIZE
+		ci.draw_line(at - d * half, at + d * half, Color(SHAFT, alpha), 1.3 * SIZE)
+		ci.draw_primitive(PackedVector2Array([at + d * (half + 3 * SIZE), at + d * (half - 0.5) - n * 1.6, at + d * (half - 0.5) + n * 1.6]), PackedColorArray([Color(HEAD, alpha)]), none)
+		ci.draw_primitive(PackedVector2Array([at - d * half, at - d * (half + 3 * SIZE) - n * 2.2, at - d * (half - 2.5 * SIZE), at - d * (half + 3 * SIZE) + n * 2.2]), PackedColorArray([Color(fletch, alpha)]), none)

@@ -159,7 +159,7 @@ func _init(type_: String, x: float, y: float, home_: Dictionary, threat: Variant
 	if look.get("offhand") == "horn":
 		rig.use_sprites = false # (the horn is raised to blow it: drawn live)
 	if look.get("offhand") == "shield":
-		shield_hp = 6 + (threat.hp_bonus if threat else 0)
+		shield_hp = 10 + (threat.hp_bonus if threat else 0)
 		speed *= SHIELD_SLOW
 
 	# The figure, and markers above its head (an elite's ring at its feet)
@@ -229,6 +229,9 @@ func update(dt: float, target: Dictionary, relentless: bool, victims: Array = []
 	if not alive():
 		if not dying:
 			_fall()
+		# Once the body's down, it may spout blood
+		if dying < 0.45 and dying + dt >= 0.45 and Blood.current:
+			Blood.current.maybe_spout(self)
 		dying += dt
 	elif state == "chase":
 		if not relentless and position.distance_to(Vector2(home.x, home.y)) > leash:
@@ -450,7 +453,7 @@ func _fall() -> void:
 	rig.die(last_hit.x, last_hit.y, last_hit.force)
 	vx = 0.0
 	vy = 0.0
-	figure.modulate = Color("#8a7e72")
+	figure.modulate = Color("#e2dad2") # (a touch drained; darker went to black through the palette)
 	in_hiding = false # killed in their hiding place: they tumble out
 	drop_blow()
 	bar.visible = false

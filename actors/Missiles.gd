@@ -16,6 +16,8 @@ const BOLT := Color("#5e3f22")
 const SHAFT := Color("#8b6236")
 const STEEL := Color("#d8dde2")
 const FEATHER := Color("#ffffff")
+const SIZE := 1.3 # arrows and bolts, drawn this much bigger than the one on the bow
+const STUCK_TIME := 8.0 # seconds an arrow that missed stays stuck in the ground
 
 var layer: Node2D
 var list: Array = [] # { lobbed, shot, damage, pos, vel, dir, t, duration, height, landed, gone }
@@ -49,7 +51,7 @@ func update(dt: float, enemies: Enemies) -> Array:
 	for s in list:
 		if s.landed:
 			s.landed += dt
-			finished = finished or s.landed >= 0.8
+			finished = finished or s.landed >= _life(s)
 			continue
 		s.t += dt
 		s.pos += s.vel * dt
@@ -79,10 +81,18 @@ func update(dt: float, enemies: Enemies) -> Array:
 		elif f >= 1:
 			s.landed = dt
 			s.height = 0.0
+			if not s.lobbed:
+				s.stuck = true # in the ground, where it fell
 	if finished:
-		list = list.filter(func(s: Dictionary) -> bool: return s.landed < 0.8)
+		list = list.filter(func(s: Dictionary) -> bool: return s.landed < _life(s))
 	_view.queue_redraw()
 	return kills
+
+
+# How long a landed shot lingers: a stone rolls to a stop and is lost; an
+# arrow stays stuck where it fell.
+func _life(s: Dictionary) -> float:
+	return STUCK_TIME if s.get("stuck", false) else 0.8
 
 
 func _draw(ci: CanvasItem) -> void:
@@ -90,8 +100,20 @@ func _draw(ci: CanvasItem) -> void:
 	for s in list:
 		if s.gone:
 			continue
-		var alpha: float = 1.0 if not s.landed else maxf(0.0, 1 - s.landed / 0.8)
+		var life := _life(s)
+		var alpha: float = 1.0 if not s.landed else clampf((life - s.landed) / 0.8, 0, 1)
 		var p: Vector2 = s.pos
+		if s.get("stuck", false):
+			# Stuck in the ground at a slant, the fletching up
+			var bolt_: bool = s.shot == "bolt"
+			var sd: Vector2 = s.dir
+			var length := (7.0 if bolt_ else 10.0) * SIZE
+			var tail := p - sd * length * 0.55 - Vector2(0, length * 0.65)
+			ci.draw_line(p, tail, Color(BOLT if bolt_ else SHAFT, alpha), 1.6 * SIZE)
+			var sn := (tail - p).normalized().orthogonal()
+			ci.draw_primitive(PackedVector2Array([tail, tail + (tail - p).normalized() * 3.5 - sn * 2.2, tail + (tail - p).normalized() * 3.5 + sn * 2.2]),
+				PackedColorArray([Color(BOLT if bolt_ else FEATHER, alpha)]), none)
+			continue
 		if s.lobbed:
 			Draw.ellipse(ci, p, 4, 3, Color(0, 0, 0, 0.25 * alpha))
 			var size: float = 1 + s.height / 50
@@ -105,9 +127,10 @@ func _draw(ci: CanvasItem) -> void:
 		ci.draw_line(p - d * 7, p + d * 8, Color(0, 0, 0, 0.2 * alpha), 1.5)
 		var at: Vector2 = p - Vector2(0, s.height)
 		var bolt: bool = s.shot == "bolt"
-		var half := 4.5 if bolt else 6.5
-		ci.draw_line(at - d * half, at + d * half, Color(BOLT if bolt else SHAFT, alpha), 1.6 if bolt else 1.3)
-		ci.draw_primitive(PackedVector2Array([at + d * (half + 3), at + d * (half - 0.5) - n * 1.6, at + d * (half - 0.5) + n * 1.6]), PackedColorArray([Color(STEEL, alpha)]), none)
+		var half := (4.5 if bolt else 6.5) * SIZE
+		n *= SIZE
+		ci.draw_line(at - d * half, at + d * half, Color(BOLT if bolt else SHAFT, alpha), (1.6 if bolt else 1.3) * SIZE)
+		ci.draw_primitive(PackedVector2Array([at + d * (half + 3 * SIZE), at + d * (half - 0.5) - n * 1.6, at + d * (half - 0.5) + n * 1.6]), PackedColorArray([Color(STEEL, alpha)]), none)
 		var feather := Color(BOLT if bolt else FEATHER, alpha)
-		ci.draw_primitive(PackedVector2Array([at - d * half, at - d * (half + 3) - n * 2.2, at - d * (half - 2.5)]), PackedColorArray([feather]), none)
+		ci.draw_primitive(PackedVector2Array([at - d * half, at - d * (half + 3 * SIZE) - n * 2.2, at - d * (half - 2.5 * SIZE)]), PackedColorArray([feather]), none)
 		ci.draw_primitive(PackedVector2Array([at - d * half, at - d * (half + 3) + n * 2.2, at - d * (half - 2.5)]), PackedColorArray([feather]), none)
