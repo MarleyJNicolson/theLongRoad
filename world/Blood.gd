@@ -70,9 +70,7 @@ func update(dt: float) -> void:
 		if landed:
 			drops = drops.filter(func(d: Dictionary) -> bool: return d.z > 0)
 			_ground.queue_redraw()
-		_air.queue_redraw()
-	elif _air.visible:
-		_air.queue_redraw()
+		_air.queue_redraw() # (the last frame of a burst clears it)
 	# Old spatter fades away
 	if not stains.is_empty():
 		var faded := false
