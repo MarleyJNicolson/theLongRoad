@@ -137,6 +137,12 @@ var _last_look: Array = [] # what the last drawing showed (see update)
 # outside it keep time but skip working out and drawing their pose, which is
 # most of their cost. (Infinite until set, so everything draws.)
 static var view := Rect2(-1e9, -1e9, 2e9, 2e9)
+# In a crowd, figures take turns to redraw: each every `crowd_step` frames
+# (set by Enemies from how many are in view). Positions still move every
+# frame; only the swing of the limbs updates less often. `always`: the
+# player's figures, which never wait their turn.
+static var crowd_step := 1
+var always := false
 
 
 func _init(style_: Dictionary) -> void:
@@ -263,6 +269,9 @@ func update(dt: float, facing_: float, speed_: float) -> void:
 	if not view.has_point(global_position):
 		if move and move.t > MOVE_TIME.get(move.name, 0.0) + move.windup:
 			move = null
+		return
+	# A crowd: wait for its turn
+	if crowd_step > 1 and not always and not ragdoll and (Engine.get_process_frames() + get_instance_id()) % crowd_step != 0:
 		return
 	# Unchanged since it was last drawn (someone standing about): leave it be.
 	# Drawing a figure is the dear part, and most of them are idle.

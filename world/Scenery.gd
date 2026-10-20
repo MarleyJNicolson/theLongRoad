@@ -139,11 +139,21 @@ func _remove(item: Dictionary) -> void:
 
 
 # Trees you're standing behind fade, so you never lose sight of yourself.
+# (Only the trees near you are looked at, and any still fading back in.)
+var _fading: Array = []
+
+
 func fade_around(x: float, y: float) -> void:
-	for item in _trees:
+	var looked := {}
+	var near: Array = _big.near(Vector2(x, y + 60), 200).filter(func(item: Dictionary) -> bool: return item.height > 0)
+	for item in near + _fading:
+		if looked.has(item) or not is_instance_valid(item.obj):
+			continue
+		looked[item] = true
 		var hidden: bool = y < item.y and y > item.y - item.height and absf(x - item.x) < item.r + 6
 		var target := 0.4 if hidden else 1.0
 		item.obj.modulate.a += (target - item.obj.modulate.a) * 0.2
+	_fading = looked.keys().filter(func(item: Dictionary) -> bool: return item.obj.modulate.a < 0.999)
 
 
 func _place_around(i: int) -> void:

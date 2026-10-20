@@ -45,6 +45,13 @@ var on_new_zones: Callable # called with zones that appear where scenery already
 var last_side_road := FIRST_SIDE_ROAD_BY - MAX_SIDE_ROAD_GAP # metres
 var next_town := Towns.next_along(Road.start_along + 1) # px along the road
 var _zones_cache: Variant = null # zones(), until the list of encounters changes
+var _solids_cache: Variant = null # obstacles(), likewise
+
+
+# Encounters came or went: lists built from them need building again.
+func _changed() -> void:
+	_zones_cache = null
+	_solids_cache = null
 
 
 func _init(layer_: Node2D, upright_: Node2D, road_: Road, enemies_: Enemies) -> void:
@@ -100,11 +107,14 @@ func on_side_road(at: Vector2) -> bool:
 	return false
 
 
+# Everything solid in the encounters (the same array until they change).
 func obstacles() -> Array:
-	var out := []
-	for e in list:
-		out.append_array(e.solids)
-	return out
+	if _solids_cache == null:
+		var out := []
+		for e in list:
+			out.append_array(e.solids)
+		_solids_cache = out
+	return _solids_cache
 
 
 # Unopened treasure chests (and arrow barrels with something left).
@@ -216,7 +226,7 @@ func place() -> void:
 				Loot.add_arrow_barrel(enc.loot, b, Vector2(m.home.x + cos(a) * 30, m.home.y + sin(a) * 30))
 				break
 		list.append(enc)
-		_zones_cache = null
+		_changed()
 		if entry:
 			last = entry
 		next_index += floori(threat.spacing * randf_range(0.85, 1.2))
@@ -235,7 +245,7 @@ func _place_town(i: int) -> void:
 	if on_new_zones.is_valid():
 		on_new_zones.call(town.zones)
 	list.append(town)
-	_zones_cache = null
+	_changed()
 
 
 # Buildings you're standing behind fade, so you never lose sight of yourself.
@@ -292,7 +302,7 @@ func update(dt: float, player: Dictionary, road_index: int) -> void:
 		enc.clear()
 		return false)
 	if list.size() != before:
-		_zones_cache = null
+		_changed()
 
 
 # Let go of everything (a restart, or quitting). A chest's functions refer
@@ -303,4 +313,4 @@ func dispose() -> void:
 			l.clear()
 		enc.clear()
 	list.clear()
-	_zones_cache = null
+	_changed()

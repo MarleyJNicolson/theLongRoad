@@ -25,6 +25,7 @@ var rig: Rig
 
 func _init() -> void:
 	rig = Rig.new({"skin": "#d9b08c", "shirt": "#6b5b3e", "legs": "#4a3a2b", "head": "straw"})
+	rig.always = true
 	add_child(rig)
 	visible = false
 

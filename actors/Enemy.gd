@@ -94,6 +94,7 @@ var blow: Variant = null # { phase: windup | swing | recover, t, landed }
 var wants_shot := false
 var removed := false # cleared away (its camp left far behind)
 var slide_side := 0
+var held := 0.0 # time waiting for its next update (see Enemies.update)
 
 var rig: Rig
 var figure: Node2D

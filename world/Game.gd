@@ -65,6 +65,7 @@ var air: Node2D
 var road: Road
 var scenery: Scenery
 var encounters: Encounters
+var solids := Obstacles.new() # everything solid, for quick lookups nearby
 var trading: Variant = null # the trader whose wares are on show
 var town: Variant = null # the town you're in, if any: { name, safe, inn }
 var clock := 0.0 # seconds since the first morning (see DayNight)
@@ -171,6 +172,8 @@ func reset() -> void:
 	scenery = Scenery.new(ground, raiders, road, encounters.zones) # trees stand among the people
 	encounters.on_new_zones = scenery.clear
 	scenery.update(0)
+	solids = Obstacles.new()
+	solids.refresh(scenery.obstacles(), encounters.obstacles())
 	trading = null
 	town = null
 	war_bands = WarBands.new(enemies, road)
@@ -304,7 +307,7 @@ func _process(delta: float) -> void:
 	if not on_foot:
 		_update_breath(dt, keys)
 	_update_puffs(dt)
-	var obstacles := scenery.obstacles() + encounters.obstacles()
+	solids.refresh(scenery.obstacles(), encounters.obstacles())
 	interaction = _interaction()
 	_mark("obstacles")
 	if Controls.pressed("interact") and interaction:
@@ -331,11 +334,11 @@ func _process(delta: float) -> void:
 	var on_road := on_main_road or encounters.on_side_road(Vector2(cart.x, cart.y))
 	_mark("road.nearest")
 
-	cart.update(dt, {} if on_foot else keys, on_road, obstacles, on_foot)
+	cart.update(dt, {} if on_foot else keys, on_road, solids.near(Vector2(cart.x, cart.y), 170), on_foot)
 	if on_foot:
 		var cart_solids := cart.bodies()
 		sprinting = _update_breath(dt, keys)
-		peasant.update(dt, keys, pointer_world(), obstacles + Array(cart_solids), sprinting)
+		peasant.update(dt, keys, pointer_world(), solids.near(peasant.position, 60) + Array(cart_solids), sprinting)
 		_keep_near_cart()
 		if peasant.dashing() and randf() < 0.6:
 			_puff(peasant.position)
@@ -383,9 +386,9 @@ func _process(delta: float) -> void:
 		enemy_arrows.fire(v)
 	for b in fight.blows:
 		hurt(b.damage, b.faction, false)
-	for h in enemy_arrows.update(dt, targets, obstacles):
+	for h in enemy_arrows.update(dt, targets, solids):
 		hurt(h.damage, h.faction, true)
-	for e in missiles.update(dt, enemies.list):
+	for e in missiles.update(dt, enemies):
 		_on_kill(e)
 	_mark("arrows+missiles")
 	_update_melee(dt, from)
@@ -1263,7 +1266,7 @@ func _interaction() -> Variant:
 
 func dismount() -> void:
 	# Step down on whichever side of the cart is clear.
-	var obstacles := scenery.obstacles() + encounters.obstacles()
+	var obstacles := solids.near(Vector2(cart.cart_x, cart.cart_y), 80)
 	var sides: Array[Vector2] = []
 	for side in [1.0, -1.0]:
 		var a: float = cart.cart_heading + side * PI / 2

@@ -112,6 +112,7 @@ func _init(layer: Node2D, x_: float, y_: float, heading_: float) -> void:
 	driver = Node2D.new()
 	rig = Rig.new({"skin": "#d9b08c", "shirt": "#6b5b3e", "legs": "#4a3a2b", "head": "straw"})
 	rig.seated = true
+	rig.always = true
 	rig.seat_z = CART.floor + 9
 	driver.add_child(rig)
 	cart.add_child(cart_back)
