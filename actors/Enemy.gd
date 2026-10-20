@@ -36,6 +36,7 @@ const LOOKS := {
 	"orc": {"scale": 1.35, "skin": "#5f7a4a", "shirt": "#4a3a2a", "legs": "#3d2f25", "head": "orc", "weapon": "cleaver"},
 }
 
+const HIT_TINT := Color("#ff7766")
 const BAR_WIDTH := 22.0
 const BAR_HEIGHT := 4.0
 const ALERT_TIME := 1.2
@@ -139,6 +140,7 @@ func _init(type_: String, x: float, y: float, home_: Dictionary, threat: Variant
 	look.scale = look.scale * (1.15 if elite else 1.0)
 	rig = Rig.new(look)
 	rig.facing = facing
+	rig.use_sprites = true # crowds draw from baked sheets (see SpriteBank)
 
 	# The figure, and markers above its head (an elite's ring at its feet)
 	if elite:
@@ -244,11 +246,19 @@ func update(dt: float, target: Dictionary, relentless: bool, victims: Array = []
 		rig.pull = clampf(1 - archery.timer / shoots.aim, 0, 1) if archery.mode == "aim" else 0.0
 		rig.loaded = archery.mode == "aim"
 	rig.update(dt, facing, Vector2(vx, vy).length())
-	visible = not in_hiding
+	# (Set only on change: each change makes Godot update the node)
+	var showing := not in_hiding
+	if visible != showing:
+		visible = showing
 	if alive():
-		figure.modulate = Color("#ff7766") if flash > 0 else Color.WHITE
-	marker.visible = alive() and alert > 0
-	marker.scale = Vector2.ONE * (1 + maxf(0.0, alert - ALERT_TIME + 0.2) * 3)
+		var tint := HIT_TINT if flash > 0 else Color.WHITE
+		if figure.modulate != tint:
+			figure.modulate = tint
+	var alarmed := alive() and alert > 0
+	if marker.visible != alarmed:
+		marker.visible = alarmed
+	if alarmed:
+		marker.scale = Vector2.ONE * (1 + maxf(0.0, alert - ALERT_TIME + 0.2) * 3)
 
 
 # --- Melee ------------------------------------------------------------------

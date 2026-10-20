@@ -143,6 +143,12 @@ static var view := Rect2(-1e9, -1e9, 2e9, 2e9)
 # player's figures, which never wait their turn.
 static var crowd_step := 1
 var always := false
+# Sprite mode (raiders): show a frame from a sheet baked from this look (see
+# SpriteBank) instead of drawing the figure, except while dying or with arrows
+# stuck in it.
+var use_sprites := false
+var _sheet: Variant = null # the sheet being shown from, or null when drawn live
+var _cell := Vector2i(-1, -1)
 
 
 func _init(style_: Dictionary) -> void:
@@ -266,10 +272,23 @@ func update(dt: float, facing_: float, speed_: float) -> void:
 			queue_redraw()
 		return
 	# Out of sight: nothing to draw (finished moves still end on time)
-	if not view.has_point(global_position):
+	if not always and not view.has_point(global_position):
 		if move and move.t > MOVE_TIME.get(move.name, 0.0) + move.windup:
 			move = null
 		return
+	# From a sprite sheet, if it has one (cheap: just pick the frame)
+	if use_sprites and not ragdoll and stuck.is_empty():
+		var sheet: Variant = _sheet if _sheet != null else SpriteBank.sheet_for(self)
+		if sheet != null:
+			var cell := SpriteBank.frame_of(self)
+			if cell != _cell or sheet != _sheet:
+				_cell = cell
+				_sheet = sheet
+				queue_redraw()
+			return
+	if _sheet != null:
+		_sheet = null
+		_last_look = [] # (draw it live from here on)
 	# A crowd: wait for its turn
 	if crowd_step > 1 and not always and not ragdoll and (Engine.get_process_frames() + get_instance_id()) % crowd_step != 0:
 		return
@@ -492,6 +511,11 @@ static func _xy(p: Vector3) -> Vector2:
 
 
 func _draw() -> void:
+	if _sheet != null:
+		var size: float = _sheet.cell
+		draw_texture_rect_region(_sheet.texture, Rect2(-size / 2, -size * SpriteBank.FEET, size, size),
+			Rect2(_cell.x * size, _cell.y * size, size, size))
+		return
 	var st := style
 	# Screen position of each joint: Vector3(x, y, depth), depth higher is nearer
 	var pts := {}

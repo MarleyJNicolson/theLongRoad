@@ -27,6 +27,7 @@ var filter_on := true
 
 func _ready() -> void:
 	RenderingServer.set_default_clear_color(PixelArt.INK)
+	add_child(SpriteBank.new()) # bakes raiders' sprite sheets as they're needed
 
 	post_view = _art_viewport("Post")
 	add_child(post_view)
