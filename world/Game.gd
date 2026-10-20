@@ -413,6 +413,7 @@ func _process(delta: float) -> void:
 	_mark("enemies")
 	for v in fight.volleys:
 		enemy_arrows.fire(v)
+		Sfx.play("bow", Vector2(v.x, v.y), -5.0)
 	for b in fight.blows:
 		hurt(b.damage, b.faction, false, b.from)
 	for h in enemy_arrows.update(dt, targets, solids):
@@ -1068,6 +1069,9 @@ func _update_held_weapon(_dt: float) -> void:
 		cart.aim = atan2(at.y - cart.cart_y, at.x - cart.cart_x) - cart.cart_heading
 
 
+const SHOT_SOUNDS := {"arrow": "bow", "bolt": "crossbow", "stone": "sling"}
+
+
 # R: put away one weapon and take out the other.
 func swap_weapon() -> void:
 	active = "melee" if active == "ranged" else "ranged"
@@ -1092,6 +1096,7 @@ func _update_throwing(dt: float, from: Dictionary) -> void:
 		say("Out of %s%s!" % [Items.AMMO[weapon.ammo].name.to_lower(), " in your bag" if on_foot else ""])
 	if in_hand and down and throw_cooldown <= 0 and loaded:
 		missiles.throw(Vector2(from.x, from.y), target, Vector2(from.vx, from.vy), weapon)
+		Sfx.play(SHOT_SOUNDS.get(weapon.shot, "sling"), Vector2(from.x, from.y))
 		_take_ammo(weapon.ammo)
 		if on_foot:
 			peasant.fire()
@@ -1200,12 +1205,16 @@ func _strike(from: Dictionary, s: Dictionary) -> void:
 		targets.append({"e": e, "dist": dist, "dx": dx, "dy": dy})
 	targets.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.dist < b.dist)
 	var hit: Array = targets.slice(0, s.pierce) if s.has("pierce") else targets
+	var here := Vector2(from.x, from.y)
+	Sfx.play("swing_heavy" if s.fx == "heavy" else "swing", here)
 	for t in hit:
 		var d: float = t.dist if t.dist else 1.0
 		# A shield facing you takes it (an axe's heavy blow twice over)
 		if t.e.blocks(Vector2(-t.dx, -t.dy)):
 			t.e.hit_shield(s.damage * (2 if s.fx == "heavy" else 1), t.dx / d, t.dy / d)
+			Sfx.play("block", t.e.position)
 			continue
+		Sfx.play("hit_heavy" if s.fx == "heavy" else "hit", t.e.position)
 		t.e.hit(t.dx / d, t.dy / d, s.damage, s.get("force", 1.0))
 		# A killing cut sprays blood along the swing of the blade
 		if not t.e.alive() and (s.fx == "slash" or s.fx == "heavy"):
@@ -1270,6 +1279,8 @@ func _drop(kind: String, x: float, y: float) -> void:
 
 
 func scatter(kind: String, count: int, x: float, y: float) -> void:
+	if kind == "coin" and count > 0:
+		Sfx.play("coin", Vector2(x, y))
 	for k in count:
 		var a := float(k) / count * TAU
 		var spread := 14.0 if count > 1 else 0.0
@@ -1322,12 +1333,15 @@ func hurt(dmg: int, faction: String, arrow: bool, from := Vector2.INF) -> void:
 		if breath <= 0:
 			out_of_breath = true
 		block_flash = 0.25
+		Sfx.play("block")
 		return
 	# Armour only protects the peasant, not the cart.
 	if on_foot and randf() < Items.block_chance(equipment):
 		block_flash = 0.25
+		Sfx.play("block", Vector2.INF, -4.0)
 		return
 	invulnerable = INVULNERABLE
+	Sfx.play("hurt" if on_foot else "thunk", Vector2.INF, 0.0 if on_foot else 4.0)
 	shake = 0.3
 	var goblins := faction == "goblin"
 	if on_foot:
@@ -1703,7 +1717,10 @@ func _debug_aim() -> void:
 func debug_key(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
-	if event.keycode >= KEY_1 and event.keycode <= KEY_4:
+	if event.keycode == KEY_M:
+		Sfx.muted = not Sfx.muted
+		say("Sound off" if Sfx.muted else "Sound on")
+	elif event.keycode >= KEY_1 and event.keycode <= KEY_4:
 		debug_zoom = event.keycode - KEY_0
 	elif event.keycode == KEY_F2:
 		_debug_cycle("ranged", ["Shepherd’s Sling", "Hunting Bow", "Crossbow"])
@@ -1882,6 +1899,7 @@ func update_camera(dt: float) -> void:
 	# Snap to whole art pixels so the picture doesn't shimmer as it scrolls.
 	var origin := (half - cam * zoom + Vector2(randf() - 0.5, randf() - 0.5) * jolt).round()
 	get_viewport().canvas_transform = Transform2D(0.0, Vector2(zoom, zoom), 0.0, origin)
+	Sfx.listener = cam
 	# What's in view (with room for a raider's height and a weapon's reach)
 	Rig.view = Rect2(-origin / zoom, half * 2 / zoom).grow(120)
 

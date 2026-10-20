@@ -94,6 +94,7 @@ func update(dt: float, cart_heading: float, enemies: Enemies, missiles: Missiles
 			drawing += dt
 			if drawing >= info.draw:
 				missiles.throw(me, aim_at, Vector2.ZERO, info.weapon)
+				Sfx.play("crossbow" if info.weapon.shot == "bolt" else "bow", me, -3.0)
 				rig.loose()
 				drawing = 0.0
 				cooldown = info.cooldown

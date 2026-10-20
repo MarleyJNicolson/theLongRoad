@@ -454,6 +454,7 @@ func _fall() -> void:
 	vx = 0.0
 	vy = 0.0
 	figure.modulate = Color("#e2dad2") # (a touch drained; darker went to black through the palette)
+	Sfx.play("fall", position)
 	in_hiding = false # killed in their hiding place: they tumble out
 	drop_blow()
 	bar.visible = false

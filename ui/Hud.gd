@@ -18,7 +18,7 @@ const WINDED_FILL := Color("#8a7a5a")
 const EMPTY := Color("#cf5528")
 const FOOT_CONTROLS := "WASD walk · Shift sprint · Ctrl/Space dash · E interact · Click attack · Right mouse shield · R swap · B bag · C cart"
 const CART_CONTROLS := "W/S speed · A/D steer · Shift gallop · E get off · Click attack · Right mouse shield · R swap · B bag · C cart"
-const DEV_KEYS := "F2 / F3 weapons · F4 raiders · F5 huge wave\nF6 off hand · F7 archer · F8 armour\nF9 next town · F10 dev mode off · F11 horn band\nF1 filter · 1-4 zoom (or scroll)"
+const DEV_KEYS := "F2 / F3 weapons · F4 raiders · F5 huge wave\nF6 off hand · F7 archer · F8 armour\nF9 next town · F10 dev mode off · F11 horn band\nF1 filter · 1-4 zoom (or scroll) · M sound"
 
 
 # A control that draws itself with `paint` (bars, hearts, coins).
@@ -603,6 +603,7 @@ func _draw() -> void:
 		draw_rect(Rect2(Vector2.ZERO, size), Color(0, 0, 0, game.rest_fade))
 	if game.state == "over":
 		return
+	_draw_cursor_ammo()
 	var tether := _tether_view()
 	if tether.is_empty():
 		return
@@ -615,6 +616,23 @@ func _draw() -> void:
 	if tether.warn:
 		var text := ("You can go no further from your cart" if tether.at_limit else "You are straying too far from your cart") + " – head back!"
 		_draw_warning(text, pulse)
+
+
+# With a ranged weapon in hand, what's left to shoot, just under the pointer
+# (red when it's run out).
+func _draw_cursor_ammo() -> void:
+	var g := game
+	if g.active != "ranged" or g.pointer_over_ui or not g.pointer_active or not g.pointer_inside:
+		return
+	var kind: String = g.ranged().ammo
+	var count := g.ammo_count(kind)
+	var text := "∞" if g.dev_mode else str(count)
+	var font := Fonts.ui(600)
+	var font_size := roundi(14 * dpr)
+	var at := get_viewport().get_mouse_position() + Vector2(12, 26) * dpr
+	var colour := EMPTY if count == 0 and not g.dev_mode else TEXT
+	draw_string_outline(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, roundi(3 * dpr), INK)
+	draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, colour)
 
 
 # On foot: a warning when straying too far, and an arrow at the screen edge

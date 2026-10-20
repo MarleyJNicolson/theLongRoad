@@ -219,6 +219,7 @@ func _sound_horn(band: Dictionary, me: Vector2, metres: float) -> void:
 	horn.add_child(wave)
 	band.blast = wave
 	jolt = 0.6
+	Sfx.play("horn", Vector2.INF, 0.0, 0.0) # (heard wherever you are)
 	messages.append("The war horn sounds! A horde is coming")
 	# The horde: from all round, out of sight, straight for you
 	var km := metres / 1000.0

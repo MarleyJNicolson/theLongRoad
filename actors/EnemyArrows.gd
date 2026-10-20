@@ -63,6 +63,7 @@ func update(dt: float, victims: Array, obstacles: Obstacles) -> Array:
 			# archer's own perch, such as a watchtower); there it stays a while.
 			a.stuck = dt
 			a.grounded = a.left <= 0
+			Sfx.play("thunk", a.pos, -4.0)
 	if keep:
 		list = list.filter(func(a: Dictionary) -> bool: return a.stuck < STUCK_TIME)
 	_view.queue_redraw()

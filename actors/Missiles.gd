@@ -67,8 +67,10 @@ func update(dt: float, enemies: Enemies) -> Array:
 		if target and target.blocks(-s.dir):
 			# Into their shield: it takes the damage, the shot drops
 			target.hit_shield(s.damage, s.dir.x, s.dir.y)
+			Sfx.play("block", target.position, -2.0)
 			s.gone = not s.lobbed
 		elif target:
+			Sfx.play("hit_arrow" if not s.lobbed else "hit", target.position, -2.0)
 			target.hit(s.dir.x, s.dir.y, s.damage)
 			if not target.alive() and s.yours:
 				kills.append(target)
@@ -83,6 +85,7 @@ func update(dt: float, enemies: Enemies) -> Array:
 			s.height = 0.0
 			if not s.lobbed:
 				s.stuck = true # in the ground, where it fell
+				Sfx.play("thunk", s.pos)
 	if finished:
 		list = list.filter(func(s: Dictionary) -> bool: return s.landed < _life(s))
 	_view.queue_redraw()
