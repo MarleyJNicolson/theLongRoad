@@ -150,6 +150,7 @@ func _process(_delta: float) -> void:
 			for key in arg.trim_prefix("--press=").split(","):
 				var press := InputEventKey.new()
 				press.keycode = OS.find_keycode_from_string(key)
+				press.physical_keycode = press.keycode # (game actions use physical keys)
 				press.pressed = true
 				Input.parse_input_event(press)
 		elif arg == "--nofilter" and _frames == 1:

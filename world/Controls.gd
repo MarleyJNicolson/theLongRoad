@@ -20,7 +20,9 @@ const KEYS := {
 }
 const BUTTONS := {
 	"attack": [MOUSE_BUTTON_LEFT],
-	"swap": [MOUSE_BUTTON_RIGHT], # right-click swaps weapons
+	# Right-click swaps weapons too, but not over a panel (where it sells), so
+	# it's its own action
+	"swap_click": [MOUSE_BUTTON_RIGHT],
 }
 
 

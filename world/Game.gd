@@ -37,6 +37,7 @@ const CART_REACH := 22.0 # extra melee reach swinging down from the cart
 const ITEM_CHANCE := 0.45 # chance a chest also holds armour or a weapon
 const LOOT_REACH := 34.0 # how close to stand to search a container
 const TRADE_REACH := 46.0 # how close to stand to a trader
+const STORAGE_REACH := 90.0 # how close to stand to the cart to use its storage
 
 # Set by Main: world units → art pixels, and CSS pixels per art pixel.
 var art_zoom := PixelArt.WORLD_ZOOM / PixelArt.PIXEL_SIZE
@@ -114,6 +115,8 @@ var pickups: Array = [] # coins and hearts popping up: { g, kind, t }
 var out_of_ammo_at := -9.0
 var bag: Array = []
 var cart_store: Array = []
+var bag_open := false
+var cart_open := false
 
 
 func _ready() -> void:
@@ -216,6 +219,8 @@ func reset() -> void:
 	bag.resize(Items.BAG_SIZE)
 	cart_store = []
 	cart_store.resize(Items.CART_SIZE)
+	bag_open = false
+	cart_open = false
 	# Setting out with a few stones to throw
 	bag[0] = {"type": "stones", "count": 20}
 	cart_store[0] = {"type": "stones", "count": 30}
@@ -225,9 +230,17 @@ func reset() -> void:
 			for item_name in arg.trim_prefix("--equip=").split(","):
 				var item := Items.named(item_name)
 				equipment[item.slot] = item
-				active = item.slot
+				if item.slot == "ranged" or item.slot == "melee":
+					active = item.slot
 				if item.has("ammo"):
 					stash(cart_store, item.ammo, 30)
+		# `--give=Mail Shirt,poultice` puts gear (or supplies) in the bag
+		elif arg.begins_with("--give="):
+			for thing in arg.trim_prefix("--give=").split(","):
+				if Items.CONSUMABLES.has(thing):
+					add_to_bag({"type": thing, "count": 3})
+				else:
+					add_to_bag({"type": "gear", "item": Items.named(thing)})
 
 
 func _exit_tree() -> void:
@@ -278,9 +291,19 @@ func _process(delta: float) -> void:
 	interaction = _interaction()
 	if Controls.pressed("interact") and interaction:
 		interaction.act.call()
+	if Controls.pressed("bag"):
+		toggle_bag()
+	if Controls.pressed("cart"):
+		toggle_cart()
+	if cart_open and not near_cart():
+		cart_open = false
+		say("You walk away from the cart")
 	if Controls.pressed("close"):
 		trading = null
-	if Controls.pressed("swap"):
+		bag_open = false
+		cart_open = false
+	# (A right-click on a panel is for selling, not swapping weapons)
+	if Controls.pressed("swap") or (Controls.pressed("swap_click") and not pointer_over_ui):
 		swap_weapon()
 
 	var near := road.nearest(cart.x, cart.y, road_index)
@@ -461,6 +484,168 @@ func add_to_bag(entry: Dictionary) -> bool:
 		return false
 	bag[free] = entry.duplicate()
 	return true
+
+
+# --- Bag and cart storage ----------------------------------------------------
+
+func toggle_bag() -> void:
+	bag_open = not bag_open
+
+
+# The cart's storage can only be reached from the cart or right beside it.
+func near_cart() -> bool:
+	if not on_foot:
+		return true
+	return Vector2(cart.cart_x, cart.cart_y).distance_to(peasant.position) < STORAGE_REACH
+
+
+func toggle_cart() -> void:
+	if cart_open:
+		cart_open = false
+		return
+	if not near_cart():
+		say("You need to be at the cart")
+		return
+	cart_open = true
+	bag_open = true # so there's somewhere to move things to
+
+
+func container(container_name: String) -> Array:
+	return cart_store if container_name == "cart" else bag
+
+
+# Pour a stack of supplies into any part-filled stacks of the same kind.
+# Returns how many are left over.
+func _top_up(list: Array, entry: Dictionary) -> int:
+	var top: int = Items.CONSUMABLES[entry.type].stack
+	for other in list:
+		if not entry.count:
+			break
+		if is_same(other, entry) or not other or other.type != entry.type:
+			continue
+		var moved := mini(top - other.count, entry.count)
+		other.count += moved
+		entry.count -= moved
+	return entry.count
+
+
+# Move something between (or within) the bag and the cart. With a slot `j` it
+# goes there (swapping with whatever is in it); with j = -1, it goes wherever
+# it fits. Anything involving the cart needs you to be at it.
+func move_item(from: String, i: int, to: String, j := -1) -> void:
+	if state == "over":
+		return
+	if (from == "cart" or to == "cart") and not (cart_open and near_cart()):
+		say("You need to be at the cart")
+		return
+	var src := container(from)
+	var dst := container(to)
+	var entry: Variant = src[i]
+	if not entry or (from == to and (j == -1 or j == i)):
+		return
+	if j != -1:
+		var there: Variant = dst[j]
+		if there and there.type == entry.type and entry.type != "gear":
+			# Same supplies: stack them, leaving any overflow where it was
+			var moved := mini(Items.CONSUMABLES[entry.type].stack - there.count, entry.count)
+			there.count += moved
+			entry.count -= moved
+			if not entry.count:
+				src[i] = null
+		else:
+			dst[j] = entry
+			src[i] = there
+		return
+	if entry.type != "gear" and _top_up(dst, entry) == 0:
+		src[i] = null
+		return
+	var free := dst.find(null)
+	if free < 0:
+		say("The cart is full" if to == "cart" else "Your bag is full")
+		return
+	dst[free] = entry
+	src[i] = null
+
+
+# Click on a bag slot: put gear on (swapping with what's worn), or use a
+# poultice or planks.
+func use_bag_item(i: int) -> void:
+	var entry: Variant = bag[i]
+	if not entry or state == "over":
+		return
+	if entry.type == "gear":
+		var item: Dictionary = entry.item
+		var worn: Variant = equipment[item.slot]
+		equipment[item.slot] = item
+		bag[i] = {"type": "gear", "item": worn} if worn else null
+		say("Equipped %s" % item.name)
+		return
+	if Items.CONSUMABLES[entry.type].has("ammo"):
+		say("Ammunition is used up as you shoot")
+		return
+	if entry.type == "poultice":
+		if health >= MAX_HEALTH:
+			say("You are already in good health")
+			return
+		health += 1
+		var me := player()
+		_drop("heart", me.x, me.y)
+		say("You bind your wounds (+1 ♥)")
+	else:
+		if cart_health >= MAX_CART_HEALTH:
+			say("The cart needs no mending")
+			return
+		cart_health = mini(MAX_CART_HEALTH, cart_health + 2)
+		_drop("plank", cart.cart_x, cart.cart_y)
+		say("You patch up the cart (+2)")
+	entry.count -= 1
+	if entry.count <= 0:
+		bag[i] = null
+
+
+# Right-click on a bag (or cart) slot: sell one of it.
+func sell_bag_item(i: int, from := "bag") -> void:
+	var list := container(from)
+	var entry: Variant = list[i]
+	if not entry or state == "over":
+		return
+	if from == "cart" and not (cart_open and near_cart()):
+		return
+	var value := value_of(entry)
+	gold += value
+	var thing: String
+	var ammo := false
+	if entry.type == "gear":
+		thing = entry.item.name
+	else:
+		var info: Dictionary = Items.CONSUMABLES[entry.type]
+		ammo = info.has("ammo")
+		thing = "%d %s" % [entry.count, info.name.to_lower()] if ammo else info.name
+	# Ammunition goes as a whole stack; everything else one at a time
+	if entry.type == "gear" or ammo:
+		list[i] = null
+	else:
+		entry.count -= 1
+		if entry.count <= 0:
+			list[i] = null
+	say("Sold %s for %d gold" % [thing, value])
+
+
+# Click on an equipped slot: take it off and put it in the bag.
+func unequip(slot: String) -> void:
+	var item: Variant = equipment[slot]
+	if not item or state == "over":
+		return
+	if not add_to_bag({"type": "gear", "item": item}):
+		say("Your bag is full")
+		return
+	equipment[slot] = null
+	say("Took off %s" % item.name)
+
+
+# The item a bag or cart entry is (gear, or the consumable it's a stack of).
+static func entry_item(entry: Dictionary) -> Dictionary:
+	return entry.item if entry.type == "gear" else Items.CONSUMABLES[entry.type]
 
 
 # --- Trading -----------------------------------------------------------------

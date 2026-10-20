@@ -3,8 +3,8 @@ extends Control
 
 # The HUD over the pixelated world (from PixiStage.vue), drawn in screen pixels.
 # So far: a stand-in status line, the cart arrow at the screen edge and the
-# "straying too far" warning. Sizes from the CSS are in CSS pixels; `dpr`
-# scales them to the screen.
+# "straying too far" warning, the equipment, bag, cart and trade panels.
+# Sizes from the CSS are in CSS pixels; `dpr` scales them to the screen.
 
 const INK := Color("#1c1714")
 
@@ -13,6 +13,10 @@ var device_px := 2 # screen pixels per art pixel (set by Main)
 var dpr := 1.0 # screen pixels per CSS pixel (set by Main)
 var status: Label
 var trade: TradePanel
+var equipment: EquipmentPanel
+var bag: InventoryPanel
+var cart_store: InventoryPanel
+var _built_at := 0.0 # the dpr the panels were built for
 
 
 func _init(game_: Game) -> void:
@@ -34,8 +38,26 @@ func _init(game_: Game) -> void:
 
 func _process(_delta: float) -> void:
 	status.text = _status_text()
+	if dpr != _built_at:
+		_build_panels()
+	equipment.refresh()
+	bag.refresh()
+	cart_store.refresh()
 	trade.refresh(game.trade_view(), game.gold, dpr)
 	queue_redraw()
+
+
+# (Re)build the panels at the current scale.
+func _build_panels() -> void:
+	for panel in [equipment, bag, cart_store]:
+		if panel:
+			panel.queue_free()
+	equipment = EquipmentPanel.new(game, dpr)
+	bag = InventoryPanel.new(game, "bag", dpr)
+	cart_store = InventoryPanel.new(game, "cart", dpr)
+	for panel in [equipment, bag, cart_store]:
+		add_child(panel)
+	_built_at = dpr
 
 
 # Stand-in until the real HUD panels are ported.

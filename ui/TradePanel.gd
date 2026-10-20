@@ -110,20 +110,17 @@ func _row(offer: Dictionary) -> Control:
 	line.add_theme_constant_override("separation", roundi(10 * dpr))
 	row.add_child(line)
 
-	# The item's picture (a tier-coloured tile until the item icons are ported)
+	# The item's picture, edged in its quality colour if it's gear
 	var item: Dictionary = offer.item if offer.item else {"icon": SERVICE_ICON.get(offer.type, ""), "tier": 1}
-	var tier: Dictionary = Items.TIER_COLOURS[clampi(item.get("tier", 1), 0, 3)]
-	var icon := Panel.new()
-	icon.custom_minimum_size = Vector2(40, 40) * dpr
-	var tile := StyleBoxFlat.new()
-	tile.bg_color = Color(tier.fill, 0.35)
-	tile.border_color = tier.edge if offer.kind == "gear" else Color(TEXT, 0.2)
-	tile.set_border_width_all(roundi(2 * dpr))
-	icon.add_theme_stylebox_override("panel", tile)
-	var letter := _label(str(item.get("icon", "?")).substr(0, 2).capitalize(), 13, TEXT)
-	letter.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	icon.add_child(letter)
-	line.add_child(icon)
+	var edge: Color = Items.TIER_COLOURS[clampi(item.get("tier", 1), 0, 3)].edge if offer.kind == "gear" else Color(TEXT, 0.2)
+	var icon := Painter.new(func(ci: CanvasItem) -> void:
+		ci.draw_rect(Rect2(Vector2.ZERO, Vector2(40, 40) * dpr).grow(-dpr), edge, false, 2 * dpr)
+		ItemIcon.draw(ci, Rect2(Vector2(5, 5) * dpr, Vector2(30, 30) * dpr), item))
+	var holder := Control.new()
+	holder.custom_minimum_size = Vector2(40, 40) * dpr
+	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	holder.add_child(icon)
+	line.add_child(holder)
 
 	var text := VBoxContainer.new()
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
