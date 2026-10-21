@@ -41,10 +41,10 @@ const FEATURES := {
 }
 
 const MIXES := {
-	"The Meadows": {"oak": 10, "birch": 6, "pine": 2, "deadTree": 1, "bush": 9, "boulder": 2, "rock": 6, "stump": 2, "log": 1.5, "flowers": 8, "tufts": 14, "patch": 2, "ruin": 0.4, "stones": 0.15},
-	"The Darkwood": {"pine": 16, "oak": 6, "deadTree": 4, "bush": 8, "mushrooms": 6, "log": 4, "stump": 4, "boulder": 2, "rock": 3, "tufts": 8, "patch": 2, "bones": 1, "ruin": 0.35, "stones": 0.1},
-	"The Barrens": {"deadTree": 5, "oak": 1, "bush": 7, "boulder": 6, "rock": 10, "bones": 4, "tufts": 12, "patch": 3, "ruin": 0.5, "stones": 0.3},
-	"The Frostmarch": {"pine": 12, "deadTree": 3, "birch": 3, "boulder": 5, "rock": 6, "tufts": 6, "log": 2, "patch": 2, "ruin": 0.35, "stones": 0.3},
+	"The Meadows": {"oak": 10, "birch": 6, "pine": 2, "deadTree": 1, "bush": 9, "boulder": 2, "rock": 6, "stump": 2, "log": 1.5, "flowers": 8, "tufts": 14, "patch": 2, "ruin": 0.4, "stones": 0.35},
+	"The Darkwood": {"pine": 16, "oak": 6, "deadTree": 4, "bush": 8, "mushrooms": 6, "log": 4, "stump": 4, "boulder": 2, "rock": 3, "tufts": 8, "patch": 2, "bones": 1, "ruin": 0.35, "stones": 0.28},
+	"The Barrens": {"deadTree": 5, "oak": 1, "bush": 7, "boulder": 6, "rock": 10, "bones": 4, "tufts": 12, "patch": 3, "ruin": 0.5, "stones": 0.5},
+	"The Frostmarch": {"pine": 12, "deadTree": 3, "birch": 3, "boulder": 5, "rock": 6, "tufts": 6, "log": 2, "patch": 2, "ruin": 0.35, "stones": 0.45},
 }
 
 var patches: Node2D # ground colour patches lie under everything
@@ -61,6 +61,7 @@ var _obstacles_dirty := true
 # from, and grids of big things and zones (see _is_clear).
 var _trees: Array = []
 var _gatherable: Array = []
+var _relics: Array = [] # stone circles with a relic still on the altar
 var _big := Grid.new(160)
 var _zones := Grid.new(256)
 var _zones_seen: Variant = null # the zone list _zones was built from
@@ -214,6 +215,8 @@ func _remove(item: Dictionary) -> void:
 		_trees.erase(item)
 	if item.kind == "rock" or item.kind == "boulder":
 		_gatherable.erase(item)
+	if item.get("relic") != null:
+		_relics.erase(item)
 	if item.big:
 		_big.remove(Vector2(item.x, item.y), 0, item)
 
@@ -258,7 +261,9 @@ func _place(feature: String, x: float, y: float, road: Variant, i: int, cell: Va
 	if not _is_clear(x, y, 0.0 if f.has("flat") else r + 12, r if big else 0.0):
 		return false
 
-	var drawn: Dictionary = _draw_feature(feature, r, biome)
+	# A stone circle may hold a relic (see Relics): its stones carry runes then
+	var relic: Variant = Relics.roll(RoadNet.metres_at(y)) if feature == "stones" and randf() < Relics.CHANCE else null
+	var drawn: Dictionary = _standing_stones(r, relic != null) if feature == "stones" else _draw_feature(feature, r, biome)
 	var obj: Node2D = drawn.g
 	obj.position = Vector2(x, y)
 	if f.has("spin"):
@@ -283,8 +288,16 @@ func _place(feature: String, x: float, y: float, road: Variant, i: int, cell: Va
 	var gather := randi_range(f.stones[0], f.stones[1]) if f.has("stones") else 0
 	var height: float = drawn.get("height", 0.0) if f.has("tree") else 0.0 # only trees fade (see fade_around)
 	var item := {"obj": obj, "extras": extras, "src": src, "road": road, "i": i, "cell": cell, "x": x, "y": y, "r": r, "big": big,
-		"solids": solids, "gather": gather, "kind": feature, "height": height}
+		"solids": solids, "gather": gather, "kind": feature, "height": height, "relic": relic}
 	items.append(item)
+	if relic != null:
+		var shine := Relics.view()
+		shine.position = Vector2(x, y + 1)
+		upright.add_child(shine)
+		Relics.animate(shine)
+		extras.append(shine)
+		item.relic_view = shine
+		_relics.append(item)
 	if height:
 		_trees.append(item)
 	if gather:
@@ -306,6 +319,29 @@ func gatherable_near(x: float, y: float, reach: float) -> Variant:
 			best = item
 			best_dist = d
 	return best
+
+
+# The nearest stone circle with its relic still there, within `reach` of the
+# altar (or null).
+func relic_near(x: float, y: float, reach: float) -> Variant:
+	for item in _relics:
+		if Vector2(item.x - x, item.y - y).length() < reach:
+			return item
+	return null
+
+
+# Lift the relic off a circle's altar; returns it ({ name, value }). The runes
+# go dark.
+func take_relic(item: Dictionary) -> Dictionary:
+	var relic: Dictionary = item.relic
+	item.relic = null
+	_relics.erase(item)
+	if is_instance_valid(item.relic_view):
+		item.relic_view.queue_free()
+	for e in item.extras:
+		if is_instance_valid(e):
+			e.modulate = Color(0.85, 0.85, 0.85, e.modulate.a)
+	return relic
 
 
 # Take stones from a rock: small rocks are carried off whole once empty;
@@ -526,34 +562,81 @@ static func _boulder(r: float, biome: Dictionary) -> Dictionary:
 	return {"g": g, "height": r * 1.4}
 
 
-# One standing stone: a weathered upright slab.
-static func _slab() -> Sketch:
+# One standing stone: a weathered upright slab, now and then with moss, and
+# with runes glowing faintly blue if the circle still holds its relic.
+static func _slab(scale := 1.0, runes := false) -> Sketch:
 	var g := Sketch.new()
-	var w := randf_range(5, 7)
-	var h := randf_range(16, 24)
+	var w := randf_range(5, 7) * scale
+	var h := randf_range(16, 24) * scale
 	_shadow(g, w * 1.6, 4, 0.28)
 	g.poly(Sketch.round_rect_points(-w, -h, w * 2, h, 2), Color("#69717c"))
 	g.rect(w * 0.2, -h + 2, w * 0.8, h - 2, Color("#575f6b")) # shaded side
 	g.poly(Sketch.round_rect_points(-w, -h, w * 2, 4, 2), Color("#8f97a1")) # weathered top
 	g.line(Vector2(-w * 0.4, -h * 0.6), Vector2(-w * 0.1, -h * 0.35), 1, Color("#3c424d"))
+	if randf() < 0.4:
+		g.ellipse(Vector2(-w * 0.3, -h * randf_range(0.15, 0.4)), w * 0.5, 2.2, Color("#5d7339", 0.85))
+	if runes:
+		var c := Color("#7aa8ec", 0.85)
+		var top := -h * 0.75
+		g.line(Vector2(-w * 0.45, top), Vector2(-w * 0.45, top + h * 0.35), 1, c)
+		g.line(Vector2(-w * 0.45, top + h * 0.12), Vector2(-w * 0.05, top), 1, c)
+		g.line(Vector2(-w * 0.05, top + h * 0.2), Vector2(-w * 0.05, top + h * 0.42), 1, c)
 	return g
 
 
-# An ancient ring of standing stones round a flat altar stone.
-static func _standing_stones(r: float) -> Dictionary:
+# Two stones with a third laid across them: a gateway of the old people.
+static func _trilithon(angle: float, runes: bool) -> Sketch:
 	var g := Sketch.new()
-	g.ellipse(Vector2.ZERO, r + 10, (r + 10) * 0.9, Color(0, 0, 0, 0.06))
-	var altar := Sketch.round_rect_points(-10, -5, 20, 10, 2)
-	g.poly(altar, Color("#7c848f")).poly_stroke(altar, 1, Color("#575f6b"))
+	var across := Vector2.from_angle(angle + PI / 2) * 7
+	var h := randf_range(22, 28)
+	for s in [-1.0, 1.0]:
+		var leg := _slab(0.8, runes)
+		leg.position = across * s
+		g.add_child(leg)
+	var lintel := Sketch.new()
+	var a := across * -1.5 + Vector2(0, -h - 2)
+	var b := across * 1.5 + Vector2(0, -h - 2)
+	lintel.capsule(a, b, 6, Color("#69717c"))
+	lintel.line(a + Vector2(0, -2), b + Vector2(0, -2), 2, Color("#8f97a1"))
+	g.add_child(lintel)
+	return g
+
+
+# An ancient ring of stones (port of the JS ring, and two more of its kind):
+# standing stones round a flat altar; great stone gateways in a ring; or a
+# ring of small stones round one tall monolith. Its relic, if it has one,
+# floats over the middle.
+static func _standing_stones(r: float, runes := false) -> Dictionary:
+	var g := Sketch.new()
+	g.ellipse(Vector2.ZERO, r + 12, (r + 12) * 0.9, Color(0, 0, 0, 0.07))
+	g.ellipse(Vector2.ZERO, r * 0.55, r * 0.45, Color("#7c766c", 0.18)) # worn ground
 	var solids := []
 	var uprights := []
-	var count := 7
+	var kind := randi() % 3
+	var count: int = [7, 5, 10][kind]
+	var ring: float = r * [1.0, 1.1, 0.95][kind]
 	for k in count:
-		var a := float(k) / count * TAU
-		var x := cos(a) * r
-		var y := sin(a) * r * 0.9
-		uprights.append({"g": _slab(), "x": x, "y": y})
-		solids.append(Vector3(x, y, 8))
+		var a := float(k) / count * TAU + randf_range(-0.08, 0.08)
+		var x := cos(a) * ring
+		var y := sin(a) * ring * 0.9
+		if kind == 0 and randf() < 0.15:
+			# One fallen, lying in the grass
+			g.capsule(Vector2(x, y), Vector2(x, y) + Vector2.from_angle(a + 1.2) * 18, 9, Color("#69717c"))
+			g.line(Vector2(x, y) + Vector2(0, -2), Vector2(x, y) + Vector2.from_angle(a + 1.2) * 16 + Vector2(0, -2), 2, Color("#8f97a1"))
+			continue
+		var piece: Sketch = _trilithon(a, runes) if kind == 1 else _slab(0.75 if kind == 2 else 1.0, runes)
+		uprights.append({"g": piece, "x": x, "y": y})
+		solids.append(Vector3(x, y, 9 if kind == 1 else 8))
+	if kind == 2:
+		# The monolith in the middle
+		var stone := _slab(1.8, runes)
+		uprights.append({"g": stone, "x": 0.0, "y": -10.0})
+		solids.append(Vector3(0, -10, 12))
+	else:
+		var altar := Sketch.round_rect_points(-10, -5, 20, 10, 2)
+		g.poly(altar, Color("#7c848f")).poly_stroke(altar, 1, Color("#575f6b"))
+		if runes:
+			g.ellipse_stroke(Vector2.ZERO, 7, 3, 1, Color("#7aa8ec", 0.8))
 	return {"g": g, "solids": solids, "uprights": uprights}
 
 

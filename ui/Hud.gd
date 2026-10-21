@@ -376,7 +376,9 @@ func _refresh() -> void:
 	var runs := []
 	for m in g.missions:
 		runs.append("%d → %s" % [m.crates, m.to_name])
-	_put(_supplies, "SUPPLIES %d/%d   %s" % [g.crates_carried(), g.cart_spec().crates, " · ".join(runs)] if not runs.is_empty() else "")
+	if not g.relics.is_empty():
+		runs.append("%d %s" % [g.relics.size(), "relic" if g.relics.size() == 1 else "relics"])
+	_put(_supplies, "CART %d/%d   %s" % [g.cargo(), g.cart_spec().crates, " · ".join(runs)] if not runs.is_empty() else "")
 	_supplies.visible = not runs.is_empty()
 	_vitals.reset_size()
 	_vitals.position = Vector2(W - 16 * dpr - _vitals.size.x, 16 * dpr)

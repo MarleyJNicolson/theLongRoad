@@ -97,6 +97,7 @@ var riders: Array = [] # companions in the back (see Companion), each on a seat
 const SEATS := [Vector2(-6, -6), Vector2(-6, 6), Vector2(-15, 0)]
 var size_k := 1.0 # how much bigger than a farm cart (see Carts)
 var crates := 0 # supply crates loaded (see Missions)
+var relics := 0 # relics from the stone circles, riding with them
 var rig: Rig
 var aim := 0.0 # where the driver is looking, relative to the cart
 var lantern: PointLight2D
@@ -458,7 +459,7 @@ func _draw_cart(ci: CanvasItem, behind: bool) -> void:
 		while a < long:
 			ci.draw_line(P.xy(a, -wide, floor_z), P.xy(a, wide, floor_z), CART.inside, 1)
 			a += 7
-		if crates > 0:
+		if crates + relics > 0:
 			# Supply crates, in pairs back from the bench, a second layer once
 			# the bed's full
 			var spots := []
@@ -467,10 +468,17 @@ func _draw_cart(ci: CanvasItem, behind: bool) -> void:
 				for b in [-wide * 0.45, wide * 0.45]:
 					spots.append(Vector2(row, b))
 				row -= 10.5
-			for n in crates:
+			for n in crates + relics:
 				var spot: Vector2 = spots[n % spots.size()]
 				var z := floor_z + 9.0 * floori(float(n) / spots.size())
-				_crate(ci, P, spot, z)
+				if n < crates:
+					_crate(ci, P, spot, z)
+				else:
+					# A relic, glinting gold in its wrappings
+					var at := P.xy(spot.x, spot.y, z + 3)
+					Draw.ellipse(ci, at, 4.5, 3, Color("#c9b28a"))
+					Draw.circle(ci, at - Vector2(0, 2), 2.6, Relics.GOLD)
+					Draw.circle(ci, at - Vector2(0.6, 2.6), 1.2, Relics.GEM)
 		else:
 			# Cargo: a heap of hay and two sacks
 			var hay := P.xy(-9, -3, floor_z + 5)

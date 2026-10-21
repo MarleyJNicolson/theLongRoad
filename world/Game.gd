@@ -131,6 +131,7 @@ var companions: Array = [] # who rides along to defend the cart (see Companion)
 # Supply runs under way: { to_id, to_name, from_name, crates, start, gold, gems }
 var missions: Array = []
 var gems := 0 # earned delivering supplies; spent with the captain at a region's gate
+var relics: Array = [] # ancient relics riding in the cart: { name, value } (see Relics)
 var cart_tier := 0 # which of Carts.LIST you drive
 var perks := {} # upgrades bought (see Perks): id -> how many
 var board: Variant = null # the town board you're reading: { kind: missions|wainwright|captain, town }
@@ -260,6 +261,7 @@ func reset() -> void:
 	out_of_ammo_at = -9.0
 	companions = []
 	missions = []
+	relics = []
 	gems = 0
 	cart_tier = 0
 	perks = {}
@@ -380,6 +382,7 @@ func _process(delta: float) -> void:
 
 	_mark("input")
 	cart.crates = crates_carried()
+	cart.relics = relics.size()
 	var near := net.nearest(Vector2(cart.x, cart.y))
 	var on_main_road: bool = near.dist < Road.ROAD_WIDTH / 2 + 4
 	# (A town's plaza is as good as road)
@@ -1481,6 +1484,10 @@ func _interaction() -> Variant:
 					return {"label": label, "x": spot.x, "y": spot.y, "act": func() -> void:
 						board = null if open else {"kind": role, "town": town_id}
 						trading = null}
+	var relic_site: Variant = scenery.relic_near(p.x, p.y, 44)
+	if relic_site:
+		return {"label": "E – Take the %s (an ancient relic)" % relic_site.relic.name.to_lower(), "x": relic_site.x, "y": relic_site.y - 14,
+			"act": func() -> void: take_relic(relic_site)}
 	for h in encounters.hirelings():
 		if Vector2(h.x, h.y).distance_to(p) < TRADE_REACH:
 			var offer: String = "Take on %s the %s" % [h.who, h.kind] if h.price == 0 else "Hire %s the %s for %d gold" % [h.who, h.kind, h.price]
@@ -1528,8 +1535,24 @@ func crates_carried() -> int:
 	return n
 
 
+# The cart's room is shared by supply crates and relics.
+func cargo() -> int:
+	return crates_carried() + relics.size()
+
+
 func crate_room() -> int:
-	return cart_spec().crates - crates_carried()
+	return cart_spec().crates - cargo()
+
+
+# Lift a relic off a stone circle's altar into the cart.
+func take_relic(item: Dictionary) -> void:
+	if crate_room() <= 0:
+		say("There's no room in the cart for it")
+		return
+	var relic := scenery.take_relic(item)
+	relics.append(relic)
+	Sfx.play("coin", Vector2(item.x, item.y), 0.0, 0.0)
+	say("You take the %s – any quartermaster will pay ◆ %d for it" % [relic.name.to_lower(), relic.value], 2.0)
 
 
 # Breath spent is this much of what it would be (Deep lungs).
@@ -1606,8 +1629,11 @@ func board_view() -> Variant:
 					"detail": "%d m %s%s · ● %d gold · ◆ %d gems" % [metres, Missions.compass(here.pos, dest.pos),
 						" (off the road north)" if dest.side != "c" else "", o.gold, o.gems],
 					"button": "Taken" if o.taken else "Take", "why": why, "done": o.taken})
+			for relic in relics:
+				rows.append({"name": "Sell the %s" % relic.name.to_lower(), "detail": "An ancient relic from a stone circle · the Empire pays in gems",
+					"button": "◆ %d" % relic.value, "why": "", "done": false})
 			return {"title": "%s quartermaster" % here.name, "purse": purse, "rows": rows,
-				"note": "Cart: %d of %d crates loaded. Paid on arrival for every crate that gets there; blows on the cart can smash them." % [crates_carried(), cart_spec().crates]}
+				"note": "Cart: %d of %d spaces used. Paid on arrival for every crate that gets there; blows on the cart can smash them. Relics found in stone circles are bought here for gems." % [cargo(), cart_spec().crates]}
 		"wainwright":
 			for k in Carts.LIST.size():
 				var cart_: Dictionary = Carts.LIST[k]
@@ -1642,6 +1668,13 @@ func board_act(i: int) -> void:
 	var here: Dictionary = net.towns[board.town]
 	match board.kind:
 		"quartermaster":
+			if i >= here.offers.size():
+				var relic: Dictionary = relics[i - here.offers.size()]
+				relics.erase(relic)
+				gems += relic.value
+				Sfx.play("coin")
+				say("The quartermaster takes the %s: +%d gems" % [relic.name.to_lower(), relic.value], 1.5)
+				return
 			var o: Dictionary = here.offers[i]
 			if o.taken or crate_room() < o.crates:
 				return
