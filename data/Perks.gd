@@ -1,7 +1,7 @@
 class_name Perks
 extends RefCounted
 
-# What honour buys from the captain at the gate north of each region (not in
+# What gems buy from the captain at the gate north of each region (not in
 # the JS original). They last the run. `max`: how many times one can be had.
 
 const LIST := [

@@ -240,7 +240,7 @@ static func build(b: Build, town: Dictionary) -> Dictionary:
 
 	# The quartermaster, with crates to go out (see Missions); the wainwright,
 	# who builds bigger carts (see Carts); and at the gate north, the captain
-	# who rewards honour (see Perks)
+	# who trades gems for upgrades (see Perks)
 	var staff := {}
 	var roles := [["quartermaster", "Supplies"], ["wainwright", "Wainwright"]]
 	if final:

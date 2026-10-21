@@ -2,7 +2,7 @@ class_name BoardPanel
 extends PanelContainer
 
 # A town board (not in the JS original): the quartermaster's supply runs, the
-# wainwright's carts, the gate captain's honours. Rows of what's on offer, each
+# wainwright's carts, the gate captain's upgrades. Rows of what's on offer, each
 # with a button; the game says what's offered (Game.board_view) and what a
 # press does (Game.board_act). Styled like the trader's stall (TradePanel),
 # at the right, halfway down.

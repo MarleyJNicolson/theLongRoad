@@ -128,11 +128,11 @@ var bag_open := false
 var cart_open := false
 var blocking := false # holding a shield up (right mouse)
 var companions: Array = [] # who rides along to defend the cart (see Companion)
-# Supply runs under way: { to_id, to_name, from_name, crates, start, gold, honour }
+# Supply runs under way: { to_id, to_name, from_name, crates, start, gold, gems }
 var missions: Array = []
-var honour := 0 # earned delivering supplies; spent with the captain at a region's gate
+var gems := 0 # earned delivering supplies; spent with the captain at a region's gate
 var cart_tier := 0 # which of Carts.LIST you drive
-var perks := {} # honours bought (see Perks): id -> how many
+var perks := {} # upgrades bought (see Perks): id -> how many
 var board: Variant = null # the town board you're reading: { kind: missions|wainwright|captain, town }
 # Dev mode (F10): ammunition is never used up, and the debug keys are listed
 var dev_mode := false
@@ -260,7 +260,7 @@ func reset() -> void:
 	out_of_ammo_at = -9.0
 	companions = []
 	missions = []
-	honour = 0
+	gems = 0
 	cart_tier = 0
 	perks = {}
 	board = null
@@ -1503,10 +1503,10 @@ func _interaction() -> Variant:
 	return null
 
 
-# --- Supplies, carts and honour ---------------------------------------------------------
+# --- Supplies, carts and gems ---------------------------------------------------------
 
 const CRATE_SMASH := 0.25 # chance a blow on the cart smashes a crate
-const BOARD_PROMPTS := {"quartermaster": "E – Supply runs", "wainwright": "E – See the wainwright (carts)", "captain": "E – Speak to the gate captain (honour)"}
+const BOARD_PROMPTS := {"quartermaster": "E – Supply runs", "wainwright": "E – See the wainwright (carts)", "captain": "E – Speak to the gate captain (gems)"}
 
 
 func max_health() -> int:
@@ -1574,12 +1574,12 @@ func _deliver(place: Dictionary) -> void:
 		missions.erase(m)
 		var share: float = float(m.crates) / m.start
 		var paid := roundi(m.gold * share)
-		var earned := maxi(1, roundi(m.honour * share))
+		var earned := maxi(1, roundi(m.gems * share))
 		gold += paid
-		honour += earned
+		gems += earned
 		scatter("coin", mini(paid, 12), cart.cart_x, cart.cart_y)
 		var note := ("the crate" if m.start == 1 else "all %d crates" % m.start) if m.crates == m.start else "%d of %d crates" % [m.crates, m.start]
-		say("Supplies delivered to %s – %s: +%d gold, +%d honour" % [place.name, note, paid, earned], 2.5)
+		say("Supplies delivered to %s – %s: +%d gold, +%d gems" % [place.name, note, paid, earned], 2.5)
 
 
 # What the board you're reading shows (see BoardPanel), or null.
@@ -1590,7 +1590,7 @@ func board_view() -> Variant:
 		board = null
 		return null
 	var here: Dictionary = net.towns[board.town]
-	var purse := "● %d   ✦ %d" % [gold, honour]
+	var purse := "● %d   ◆ %d" % [gold, gems]
 	var rows := []
 	match board.kind:
 		"quartermaster":
@@ -1603,8 +1603,8 @@ func board_view() -> Variant:
 				if not o.taken and crate_room() < o.crates:
 					why = "Not enough room in the cart (%d free)" % maxi(0, crate_room())
 				rows.append({"name": "%d %s to %s" % [o.crates, "crate" if o.crates == 1 else "crates", o.to_name],
-					"detail": "%d m %s%s · ● %d gold · ✦ %d honour" % [metres, Missions.compass(here.pos, dest.pos),
-						" (off the road north)" if dest.side != "c" else "", o.gold, o.honour],
+					"detail": "%d m %s%s · ● %d gold · ◆ %d gems" % [metres, Missions.compass(here.pos, dest.pos),
+						" (off the road north)" if dest.side != "c" else "", o.gold, o.gems],
 					"button": "Taken" if o.taken else "Take", "why": why, "done": o.taken})
 			return {"title": "%s quartermaster" % here.name, "purse": purse, "rows": rows,
 				"note": "Cart: %d of %d crates loaded. Paid on arrival for every crate that gets there; blows on the cart can smash them." % [crates_carried(), cart_spec().crates]}
@@ -1627,12 +1627,12 @@ func board_view() -> Variant:
 				var have: int = perks.get(perk.id, 0)
 				var most: int = perk.get("max", 1)
 				var why := ""
-				if have < most and honour < perk.cost:
-					why = "Not enough honour"
+				if have < most and gems < perk.cost:
+					why = "Not enough gems"
 				rows.append({"name": perk.name + (" (%d/%d)" % [have, most] if most > 1 else ""), "detail": perk.desc,
-					"button": "Yours" if have >= most else "✦ %d" % perk.cost, "why": why, "done": have >= most})
+					"button": "Yours" if have >= most else "◆ %d" % perk.cost, "why": why, "done": have >= most})
 			return {"title": "Captain of the %s gate" % here.name, "purse": purse, "rows": rows,
-				"note": "Honour, earned carrying supplies between the towns, buys what the garrison can teach you. It lasts the rest of the road."}
+				"note": "Gems, earned carrying supplies between the towns, buy what the garrison can teach you, for the rest of the road."}
 	return null
 
 
@@ -1647,7 +1647,7 @@ func board_act(i: int) -> void:
 				return
 			o.taken = true
 			missions.append({"to_id": o.to_id, "to_name": o.to_name, "from_name": o.from_name, "crates": o.crates,
-				"start": o.crates, "gold": o.gold, "honour": o.honour})
+				"start": o.crates, "gold": o.gold, "gems": o.gems})
 			Sfx.play("thunk")
 			say("%d %s loaded for %s" % [o.crates, "crate" if o.crates == 1 else "crates", o.to_name])
 		"wainwright":
@@ -1662,9 +1662,9 @@ func board_act(i: int) -> void:
 			say("You drive off in a %s" % cart_.name.to_lower(), 1.5)
 		"captain":
 			var perk: Dictionary = Perks.LIST[i]
-			if perks.get(perk.id, 0) >= perk.get("max", 1) or honour < perk.cost:
+			if perks.get(perk.id, 0) >= perk.get("max", 1) or gems < perk.cost:
 				return
-			honour -= perk.cost
+			gems -= perk.cost
 			perks[perk.id] = perks.get(perk.id, 0) + 1
 			if perk.id == "tough":
 				health = max_health()

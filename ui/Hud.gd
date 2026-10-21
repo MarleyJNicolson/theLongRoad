@@ -58,7 +58,7 @@ var _distance: Label
 var _speed: Label
 var _kills: Label
 var _gold: Label
-var _honour: Label
+var _gems: Label
 var _supplies: Label
 var _day_small: Label
 var _day: Label
@@ -184,8 +184,8 @@ func _build() -> void:
 	coin_row.add_child(Drawn.new(Vector2(14, 22) * dpr, _draw_coin))
 	coin_row.add_child(_gold)
 	stats.add_child(s[0])
-	s = _stat("Honour", 100, Color("#e6cfff"))
-	_honour = s[2]
+	s = _stat("Gems", 100, Color("#bfe3ff"))
+	_gems = s[2]
 	stats.add_child(s[0])
 	s = _stat("Day", 150)
 	_day_small = s[1]
@@ -348,7 +348,7 @@ func _refresh() -> void:
 	_put(_speed, "%d km/h" % (0 if g.on_foot else g.speed_kmh()))
 	_put(_kills, str(g.kills))
 	_put(_gold, str(g.gold))
-	_put(_honour, "✦ %d" % g.honour)
+	_put(_gems, "◆ %d" % g.gems)
 	var change := DayNight.until_change(g.clock)
 	var next := "Dawn" if DayNight.is_night(g.clock) or DayNight.phase(g.clock) == "dusk" else "Dusk"
 	_put(_day_small, "DAY %d · %s" % [g.day(), DayNight.phase(g.clock).to_upper()])
