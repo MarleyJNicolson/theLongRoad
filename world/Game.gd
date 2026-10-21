@@ -1250,7 +1250,7 @@ func _strike(from: Dictionary, s: Dictionary) -> void:
 		var d: float = t.dist if t.dist else 1.0
 		# A shield facing you takes it (an axe's heavy blow twice over)
 		if t.e.blocks(Vector2(-t.dx, -t.dy)):
-			t.e.hit_shield(s.damage * (2 if s.fx == "heavy" else 1), t.dx / d, t.dy / d)
+			t.e.hit_shield(2 if s.fx == "heavy" else 1, t.dx / d, t.dy / d)
 			Sfx.play("block", t.e.position)
 			continue
 		Sfx.play("hit_heavy" if s.fx == "heavy" else "hit", t.e.position)

@@ -27,8 +27,8 @@ const PALETTE := [
 	# stone, steel and snow
 	"#16181e", "#262a33", "#2f343d", "#3c424d", "#4a515c", "#575f6b", "#69717c", "#7c848f", "#8f97a1", "#a7aeb6",
 	"#c0c6cc", "#d9dee2", "#eef1f2",
-	# dusk blues
-	"#1d2836", "#33475a", "#4d6478",
+	# dusk blues, and a clear blue (shields' bars, a shield turning a blow)
+	"#1d2836", "#33475a", "#4d6478", "#3b6fc4", "#7aa8ec",
 	# blood, rust, fire and gold
 	"#2a0e0e", "#4a1514", "#76201a", "#a3331f", "#cf5528", "#ee8a36", "#f6c25a", "#fdf0a6",
 ]

@@ -48,6 +48,8 @@ const BLOCK_TINT := Color("#9cc8ff")
 # soaking up the damage until it breaks; they're slower carrying it.
 const SHIELD_ARC := deg_to_rad(70)
 const SHIELD_SLOW := 0.8
+const SHIELD_HITS := 5 # a shield breaks after this many hits (a heavy blow counts two)
+const SHIELD_BLUE := Color("#3b6fc4")
 const BAR_WIDTH := 22.0
 const BAR_HEIGHT := 4.0
 const ALERT_TIME := 1.2
@@ -162,7 +164,7 @@ func _init(type_: String, x: float, y: float, home_: Dictionary, threat: Variant
 	if look.get("offhand") == "horn":
 		rig.use_sprites = false # (the horn is raised to blow it: drawn live)
 	if look.get("offhand") == "shield":
-		shield_hp = 10 + (threat.hp_bonus if threat else 0)
+		shield_hp = SHIELD_HITS
 		speed *= SHIELD_SLOW
 
 	# The figure, and markers above its head (an elite's ring at its feet)
@@ -177,7 +179,7 @@ func _init(type_: String, x: float, y: float, home_: Dictionary, threat: Variant
 	var top := -rig.height()
 	bar = Painter.new(_draw_bar)
 	bar.position.y = top - 8
-	bar.visible = health_bar
+	bar.visible = health_bar or shield_hp > 0
 	marker = Sketch.new()
 	marker.poly(Sketch.round_rect_points(-2, -14, 4, 9, 1.5), Color("#e0463a"))
 	marker.circle(Vector2(0, -1.5), 2.2, Color("#e0463a"))
@@ -195,10 +197,20 @@ func alive() -> bool:
 	return hp > 0
 
 
+# Health in green (red when low), and over it, while they carry one, what's
+# left of their shield in blue, a notch per hit it can still take.
 func _draw_bar(ci: CanvasItem) -> void:
-	var fill := maxf(0.0, float(hp) / max_hp)
-	ci.draw_rect(Rect2(-BAR_WIDTH / 2 - 1, -1, BAR_WIDTH + 2, BAR_HEIGHT + 2), Color("#1a1008", 0.8))
-	ci.draw_rect(Rect2(-BAR_WIDTH / 2, 0, BAR_WIDTH * fill, BAR_HEIGHT), Color("#7ccf3a") if fill > 0.5 else Color("#e0463a"))
+	var y := 0.0
+	if health_bar:
+		var fill := maxf(0.0, float(hp) / max_hp)
+		ci.draw_rect(Rect2(-BAR_WIDTH / 2 - 1, -1, BAR_WIDTH + 2, BAR_HEIGHT + 2), Color("#1a1008", 0.8))
+		ci.draw_rect(Rect2(-BAR_WIDTH / 2, 0, BAR_WIDTH * fill, BAR_HEIGHT), Color("#7ccf3a") if fill > 0.5 else Color("#e0463a"))
+		y = -BAR_HEIGHT - 2
+	if shield_hp > 0:
+		ci.draw_rect(Rect2(-BAR_WIDTH / 2 - 1, y - 1, BAR_WIDTH + 2, BAR_HEIGHT + 2), Color("#0a1424", 0.85))
+		ci.draw_rect(Rect2(-BAR_WIDTH / 2, y, BAR_WIDTH * float(shield_hp) / SHIELD_HITS, BAR_HEIGHT), SHIELD_BLUE)
+		for k in range(1, SHIELD_HITS):
+			ci.draw_rect(Rect2(-BAR_WIDTH / 2 + BAR_WIDTH * k / SHIELD_HITS - 0.5, y, 1, BAR_HEIGHT), Color("#0a1424", 0.7))
 
 
 func engage() -> void:
@@ -475,9 +487,11 @@ func _fall() -> void:
 
 
 # Pick up a shield (an ordinary raider who carries one).
-func give_shield(hp_: int) -> void:
+func give_shield(_hp: int = SHIELD_HITS) -> void:
 	rig.offhand = "shield"
-	shield_hp = hp_
+	shield_hp = SHIELD_HITS
+	bar.visible = true
+	bar.queue_redraw()
 	speed *= SHIELD_SLOW
 	_redraw_kit()
 
@@ -491,24 +505,35 @@ func blocks(toward: Vector2) -> bool:
 
 
 # A shot turned by the shield: it does nothing, but they know you're there.
+# A shot into the shield: it does no harm to them, but it wears the shield
+# down (five and it breaks), and checks their pace for a moment.
 func deflect() -> void:
 	provoked = true
 	block_flash = 0.15
-	stagger = 0.35 # it checks them for a moment
+	stagger = 0.35
+	_wear_shield(1)
 
 
 # The shield takes the blow. Returns true if that broke it (it's gone, and
 # they're quicker without it).
 func hit_shield(amount: int, dir_x: float, dir_y: float) -> bool:
-	shield_hp -= amount
 	provoked = true
 	block_flash = 0.15
 	vx = dir_x * 60
 	vy = dir_y * 60
 	steady = 0.35
+	return _wear_shield(amount)
+
+
+# Take `hits` off the shield. Returns true if that broke it.
+func _wear_shield(hits: int) -> bool:
+	shield_hp -= hits
+	bar.queue_redraw()
 	if shield_hp > 0:
 		return false
 	shield_hp = 0
+	bar.visible = health_bar and alive()
+	Sfx.play("thunk", position, 2.0)
 	rig.offhand = null
 	speed /= SHIELD_SLOW
 	_redraw_kit()

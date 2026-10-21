@@ -4,7 +4,7 @@
 shader_type canvas_item;
 render_mode unshaded;
 
-uniform vec3 palette[58];
+uniform vec3 palette[60];
 uniform float ink_threshold = 0.16;
 uniform float ink_strength = 0.65;
 uniform float dither = 0.012;
@@ -42,7 +42,7 @@ vec3 grade(vec3 c) {
 vec3 nearest(vec3 c) {
 	vec3 best = INK;
 	float best_dist = 1e9;
-	for (int i = 0; i < 58; i++) {
+	for (int i = 0; i < 60; i++) {
 		vec3 d = c - palette[i];
 		float dist = dot(d * d, vec3(0.30, 0.59, 0.11));
 		if (dist < best_dist) {
