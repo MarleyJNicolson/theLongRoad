@@ -30,6 +30,9 @@ static func add_prop(b: Build, kind: String, at: Vector2, size: float = -1) -> N
 # Maybe place a treasure chest here (CHEST_CHANCE unless told otherwise). If
 # placed, it's added to the map and to the encounter's `list` of loot.
 static func maybe_add_chest(list: Array, b: Build, at: Vector2, chance := CHEST_CHANCE) -> Variant:
+	# Off the road north, across the zone, there's more to be found
+	if b.rich:
+		chance = minf(1.0, chance * 1.6)
 	if randf() >= chance:
 		return null
 	var g := b.stand(Structures.chest(false), at.x, at.y) as Sketch
@@ -38,7 +41,7 @@ static func maybe_add_chest(list: Array, b: Build, at: Vector2, chance := CHEST_
 	glint.round_stroke(PackedVector2Array([Vector2(0, -4), Vector2(0, 4)]), 1.5, Color("#fff8d0"))
 	b.stand(glint, at.x + 9, at.y - 14, at.y + 0.5)
 
-	var chest := {"kind": "chest", "x": at.x, "y": at.y, "opened": false}
+	var chest := {"kind": "chest", "x": at.x, "y": at.y, "opened": false, "rich": b.rich}
 	# A twinkle every so often to catch the player's eye.
 	chest.animate = func(time: float) -> void:
 		var t := fmod(time + at.x * 0.01, 2.5)
@@ -48,7 +51,10 @@ static func maybe_add_chest(list: Array, b: Build, at: Vector2, chance := CHEST_
 	chest.open = func() -> Dictionary:
 		chest.opened = true
 		Structures.chest(true, g.clear())
-		return _roll_chest()
+		var found := _roll_chest()
+		if chest.rich:
+			found.gold *= 2
+		return found
 	list.append(chest)
 	return chest
 

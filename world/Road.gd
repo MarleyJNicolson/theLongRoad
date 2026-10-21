@@ -1,33 +1,33 @@
 class_name Road
 extends RefCounted
 
-# An endless winding dirt road (port of road.js), generated ahead of the player
-# as a polyline and drawn in chunks so old pieces can be thrown away.
+# A winding dirt road between two towns (from road.js, which made one endless
+# road): a polyline laid out in full when its zone is made (see RoadNet), and
+# drawn in chunks only while you're near them.
 #
 # The JS draws it as stacked round-capped strokes with a world-anchored dirt
 # pattern; here each stroke is a triangle strip with UVs from world position.
 
 const SEGMENT := 30.0
 const ROAD_WIDTH := 96.0
-const CHUNK := 40
-const LOOK_AHEAD := 120
-const MAX_DRIFT := 1.1 # max angle (rad) the road may wander from heading "up"
-const UP := -PI / 2
-const MAX_HEADING := 1.4 # hard limit (rad) from "up": the road never turns back on itself
-const AVOID_LOOKAHEAD := 12 # segments ahead the road checks for places to steer round
+const CHUNK := 40 # points per drawn piece
 const PX_PER_METRE := 20.0
 const MILESTONE_EVERY := 250 # metres
+const DRAW_NEAR := 3400.0 # px: a chunk this close to you is drawn
+const DRAW_FAR := 6500.0 # px: and thrown away again this far off
+const WANDER := 0.55 # rad: most the road strays from heading straight for its end
+const STRAIGHT_ENDS := 520.0 # px: straight out of one gate and into the other
 
 var edge_layer: Node2D
 var fill_layer: Node2D
-var points := PackedVector2Array([Vector2(0, 300)]) # point i lies `i * SEGMENT` along the road
-var heading := UP
-var curve := 0.0
-var target_curve := 0.0
-var until_new_curve := 15
-var keep_out: Array = [] # Vector3(x, y, radius): places the road must steer round (side-road destinations)
-var chunks: Array = [] # { end, nodes }
-var drawn_up_to := 0
+var id := 0
+var from_town: Dictionary # (see RoadNet.towns)
+var to_town: Dictionary
+var kind := "north" # "north" (on towards the zone's gate) or "ew" (across)
+var points := PackedVector2Array() # point i lies `i * SEGMENT` along the road
+var keep_out: Array = [] # (kept for the encounter builders; the route's already laid)
+var placed := PackedByteArray() # which points the scenery has dressed (see Scenery)
+var _chunks := {} # chunk number -> its nodes, while drawn
 
 
 func _init(edge_layer_: Node2D, fill_layer_: Node2D) -> void:
@@ -35,73 +35,43 @@ func _init(edge_layer_: Node2D, fill_layer_: Node2D) -> void:
 	fill_layer = fill_layer_
 
 
-# Debug: start the road this far along (px), e.g. in another region
-# (`-- --metres=N`, read by Game).
-static var start_along := 0.0
-
-
-# How far along the road point i is (px).
-static func along(i: int) -> float:
-	return start_along + i * SEGMENT
-
-
-func generate(count: int) -> void:
-	for n in count:
+# Lay the road from `a` to `b` (world px): out of the first gate straight,
+# wandering a little on the way, and straight in at the other end.
+func lay(a: Vector2, b: Vector2) -> void:
+	points = PackedVector2Array([a])
+	var heading := (b - a).angle()
+	var curve := 0.0
+	var target_curve := 0.0
+	var until_new_curve := 6
+	var travelled := 0.0
+	while true:
 		var last := points[points.size() - 1]
-		# Forget keep-out zones the road has long since left behind.
-		if n == 0:
-			keep_out = keep_out.filter(func(z: Vector3) -> bool: return z.y - last.y < 2500)
-
-		until_new_curve -= 1
-		if until_new_curve <= 0:
-			target_curve = (randf() * 2 - 1) * 0.09
-			until_new_curve = 8 + randi() % 14
-		var drift := heading - UP
-		if absf(drift) > MAX_DRIFT:
-			target_curve = -signf(drift) * 0.06
-
-		# Steer hard away from anything built off a side road.
-		var away := _avoid(last)
-		if away:
-			target_curve = away * 0.12
-			curve = away * maxf(absf(curve), 0.07)
-
-		# Straight through a town, gate to gate (settling in on the way)
-		if Towns.straight_at(along(points.size())):
-			target_curve = 0.0
-			curve *= 0.6
-
-		curve += (target_curve - curve) * 0.12
-		heading = UP + clampf(heading + curve - UP, -MAX_HEADING, MAX_HEADING)
-		points.append(last + Vector2(cos(heading), sin(heading)) * SEGMENT)
+		var to_end := b - last
+		if to_end.length() <= SEGMENT * 1.2:
+			break
+		var straight := to_end.angle()
+		if travelled < STRAIGHT_ENDS or to_end.length() < STRAIGHT_ENDS:
+			heading = lerp_angle(heading, straight, 0.35)
+			curve = 0.0
+		else:
+			until_new_curve -= 1
+			if until_new_curve <= 0:
+				target_curve = randf_range(-0.09, 0.09)
+				until_new_curve = 8 + randi() % 14
+			curve += (target_curve - curve) * 0.12
+			var off := wrapf(heading + curve - straight, -PI, PI)
+			if absf(off) > WANDER:
+				target_curve = -signf(off) * 0.06
+			heading = straight + clampf(off, -WANDER, WANDER)
+		points.append(last + Vector2.from_angle(heading) * SEGMENT)
+		travelled += SEGMENT
+	points.append(b)
+	placed.resize(points.size())
+	placed.fill(0)
 
 
-# Which way to turn (-1 left, 1 right, 0 no need) to keep the road ahead
-# clear of the keep-out zones.
-func _avoid(from: Vector2) -> int:
-	var dir := Vector2(cos(heading), sin(heading))
-	for zone: Vector3 in keep_out:
-		var centre := Vector2(zone.x, zone.y)
-		var reach := zone.z + ROAD_WIDTH / 2 + 60
-		if centre.distance_to(from) > reach + AVOID_LOOKAHEAD * SEGMENT:
-			continue
-		for k in range(1, AVOID_LOOKAHEAD + 1):
-			if centre.distance_to(from + dir * SEGMENT * k) < reach:
-				# Turn away from the side the zone is on.
-				var side := dir.x * (zone.y - from.y) - dir.y * (zone.x - from.x)
-				return -1 if side > 0 else 1
-	return 0
-
-
-# Make sure road exists well beyond the given point index.
-func ensure_ahead(index: int) -> void:
-	while points.size() < index + LOOK_AHEAD:
-		generate(CHUNK)
-		# Stop one short of the end: the last point's normal isn't settled until
-		# the road goes on past it, and chunks must agree where they meet.
-		var end := points.size() - 2
-		_draw_chunk(maxi(0, drawn_up_to - 1), end)
-		drawn_up_to = end
+func length() -> float:
+	return (points.size() - 1) * SEGMENT
 
 
 # Unit vector along the road at point i.
@@ -112,7 +82,7 @@ func direction(i: int) -> Vector2:
 
 # Normal of the segment from point i (to the right of the way the road runs).
 func normal(i: int) -> Vector2:
-	var j := mini(i, points.size() - 2)
+	var j := clampi(i, 0, points.size() - 2)
 	var d := points[j + 1] - points[j]
 	if d == Vector2.ZERO:
 		return Vector2(0, 1)
@@ -125,7 +95,31 @@ func normal(i: int) -> Vector2:
 func _point_normal(i: int) -> Vector2:
 	if i <= 0:
 		return normal(0)
-	return (normal(i - 1) + normal(i)).normalized()
+	return (normal(i - 1) + normal(mini(i, points.size() - 2))).normalized()
+
+
+# Draw the chunks near `at`, and let go of those far off.
+func update_view(at: Vector2) -> void:
+	var count := ceili(float(points.size() - 1) / CHUNK)
+	for c in count:
+		var s := c * CHUNK
+		var e := mini(s + CHUNK, points.size() - 1)
+		var mid := points[(s + e) / 2]
+		var reach := CHUNK * SEGMENT * 0.5
+		var d := mid.distance_to(at) - reach
+		if d < DRAW_NEAR and not _chunks.has(c):
+			_chunks[c] = _draw_chunk(s, e)
+		elif d > DRAW_FAR and _chunks.has(c):
+			for node: Node2D in _chunks[c]:
+				node.queue_free()
+			_chunks.erase(c)
+
+
+func clear_view() -> void:
+	for nodes in _chunks.values():
+		for node: Node2D in nodes:
+			node.queue_free()
+	_chunks.clear()
 
 
 # A strip `width` wide along points start..end, `offset` from the centre.
@@ -136,7 +130,7 @@ func _strip(start: int, end: int, width: float, offset := 0.0, wobble := 0.0, se
 	var indices := PackedInt32Array()
 	for i in range(start, end + 1):
 		var n := _point_normal(i)
-		var a := along(i)
+		var a := i * SEGMENT + id * 977.0
 		var w := wobble * sin(a * 0.021 + seed) * sin(a * 0.0137 + seed * 2.3)
 		var c := points[i] + n * (offset + w)
 		verts.append(c - n * width / 2)
@@ -147,7 +141,7 @@ func _strip(start: int, end: int, width: float, offset := 0.0, wobble := 0.0, se
 	return [verts, indices]
 
 
-func _draw_chunk(start: int, end: int) -> void:
+func _draw_chunk(start: int, end: int) -> Array:
 	var dirt := Textures.dirt_texture()
 	var stroke := func(g: Sketch, width: float, colour: Color, alpha: float, textured: bool, offset: float, wobble: float, seed: float) -> void:
 		var strip := _strip(start, end, width, offset, wobble, seed)
@@ -155,7 +149,7 @@ func _draw_chunk(start: int, end: int) -> void:
 		g.triangles(strip[0], strip[1], colour, dirt if textured else null)
 
 	# The road surface changes with the region it runs through.
-	var biome: Dictionary = Threat.stage_at(along(start) / PX_PER_METRE).biome
+	var biome: Dictionary = Threat.stage_at(RoadNet.metres_at(points[start].y)).biome
 	var colours: Dictionary = biome.road
 
 	# Verge: earth fading into the grass, then a darker, ragged edge
@@ -197,47 +191,39 @@ func _draw_chunk(start: int, end: int) -> void:
 			fill.capsule(at.call(4, rut), at.call(26, rut), 12, Color("#a7aeb6", 0.85) if icy else Color("#33475a", 0.85))
 			fill.capsule(at.call(9, rut - 2), at.call(19, rut - 2), 3, Color("#eef1f2", 0.8) if icy else Color("#4d6478", 0.8))
 
-	# Milestones on the right-hand verge
+	# Milestones every so often: one on each verge, naming the town that way
+	# and how far it is
 	var nodes: Array[Node2D] = [edge, fill]
-	for i in range(start + 1, end + 1):
-		var prev := floori(along(i - 1) / PX_PER_METRE / MILESTONE_EVERY)
-		var here := floori(along(i) / PX_PER_METRE / MILESTONE_EVERY)
-		if here == prev or here == 0:
+	var every := roundi(MILESTONE_EVERY * PX_PER_METRE / SEGMENT)
+	for i in range(maxi(start + 1, 1), end + 1):
+		if i % every != 0 or i < every / 2 or points.size() - 1 - i < every / 2:
 			continue
-		var marker := _milestone(here * MILESTONE_EVERY)
-		marker.position = points[i] + normal(i) * (ROAD_WIDTH / 2 + 26)
-		nodes.append(marker)
+		var ahead := roundi((points.size() - 1 - i) * SEGMENT / PX_PER_METRE)
+		var behind := roundi(i * SEGMENT / PX_PER_METRE)
+		var right := _milestone("%s · %d m" % [to_town.name, ahead])
+		right.position = points[i] + normal(i) * (ROAD_WIDTH / 2 + 30)
+		nodes.append(right)
+		var left := _milestone("%s · %d m" % [from_town.name, behind])
+		left.position = points[i] - normal(i) * (ROAD_WIDTH / 2 + 30)
+		nodes.append(left)
 
 	edge_layer.add_child(edge)
 	for node in nodes.slice(1):
 		fill_layer.add_child(node)
-	chunks.append({"end": end, "nodes": nodes})
+	return nodes
 
 
-# A stone by the roadside with the distance carved on it; where a new region
-# begins, a wooden sign naming it as well.
-static func _milestone(metres: int) -> Node2D:
+# A stone by the roadside with a town's name and the distance to it carved on.
+static func _milestone(text: String) -> Node2D:
 	var view := Node2D.new()
 	var stone := Sketch.new()
-	stone.ellipse(Vector2(4, 6), 30, 16, Color(0, 0, 0, 0.25))
-	var slab := Sketch.round_rect_points(-30, -15, 60, 30, 8)
+	var w := maxf(60.0, text.length() * 9.5 + 16)
+	stone.ellipse(Vector2(4, 6), w / 2, 16, Color(0, 0, 0, 0.25))
+	var slab := Sketch.round_rect_points(-w / 2, -15, w, 30, 8)
 	stone.poly(slab, Color("#b9b5aa")).poly_stroke(slab, 3, Color("#575f6b"))
 	view.add_child(stone)
-	view.add_child(_label("%d m" % metres, Vector2.ZERO))
-
-	if metres % Threat.STAGE_LENGTH == 0:
-		var sign := Sketch.new()
-		sign.line(Vector2(0, -15), Vector2(0, -34), 5, Color("#5e3f22"))
-		var board := Sketch.round_rect_points(-100, -68, 200, 34, 3)
-		sign.poly(board, Color("#a8875c")).poly_stroke(board, 3, Color("#3d2f25"))
-		view.add_child(sign)
-		view.add_child(_label(Threat.stage_at(metres).name, Vector2(0, -51)))
+	view.add_child(Fonts.world_label(text, Vector2.ZERO, 20, Color("#1c1714")))
 	return view
-
-
-# Big enough to stay legible once drawn at pixel-art resolution.
-static func _label(text: String, centre: Vector2) -> Label:
-	return Fonts.world_label(text, centre, 22, Color("#1c1714"))
 
 
 # A strip `width` wide along any polyline, `offset` to one side, with normals
@@ -258,27 +244,3 @@ static func strip_along(line: PackedVector2Array, width: float, offset := 0.0) -
 			var j := k * 2
 			indices.append_array([j - 2, j - 1, j, j - 1, j + 1, j])
 	return [verts, indices]
-
-
-# Nearest point on the road, searching around a hint index for speed:
-# { dist, index, along }.
-func nearest(x: float, y: float, hint: int) -> Dictionary:
-	var best := {"dist": INF, "index": hint, "along": 0.0}
-	var at := Vector2(x, y)
-	for i in range(maxi(0, hint - 25), mini(points.size() - 2, hint + 40) + 1):
-		var a := points[i]
-		var d := points[i + 1] - a
-		var t := clampf((at - a).dot(d) / d.length_squared(), 0.0, 1.0)
-		var dist := at.distance_to(a + d * t)
-		if dist < best.dist:
-			best = {"dist": dist, "index": i, "along": along(i) + t * SEGMENT}
-	return best
-
-
-func cull(index: int) -> void:
-	chunks = chunks.filter(func(c: Dictionary) -> bool:
-		if c.end >= index - 60:
-			return true
-		for node: Node2D in c.nodes:
-			node.queue_free()
-		return false)

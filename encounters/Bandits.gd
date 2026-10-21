@@ -151,7 +151,7 @@ static func ambush(b: Build) -> Variant:
 	var members := []
 	var count := mini(5 + b.extra, 2 + floori(b.difficulty))
 	var sides := [1.0, -1.0] if randf() < 0.5 else [Build.side_sign()]
-	var biome: Dictionary = Threat.stage_at(Road.along(b.i) / 20.0).biome # bushes blend in with the local scrub
+	var biome: Dictionary = Threat.stage_at(b.metres).biome # bushes blend in with the local scrub
 	for k in count:
 		var side: float = sides[k % sides.size()]
 		var along := float(k) / count * maxf(110, count * 24) + randf_range(-10, 10)

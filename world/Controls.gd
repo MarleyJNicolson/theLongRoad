@@ -17,6 +17,7 @@ const KEYS := {
 	"dash": [KEY_CTRL, KEY_SPACE],
 	"swap": [KEY_R], # (R also restarts, but only once the run is over)
 	"close": [KEY_ESCAPE],
+	"map": [KEY_TAB],
 }
 const BUTTONS := {
 	"attack": [MOUSE_BUTTON_LEFT],

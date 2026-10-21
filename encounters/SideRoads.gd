@@ -33,15 +33,9 @@ static func _pick_kind() -> String:
 # that already exists: the main road only ever heads up the map, so nothing
 # built down there can be run over later. Null if there's no room.
 static func _plan_route(b: Build) -> Variant:
-	var road := b.road
 	var f := b.frame()
-	var main := road.points.slice(maxi(0, b.i - 160))
 	var clear := func(at: Vector2, gap: float) -> bool:
-		var gap2 := gap * gap
-		for m in main:
-			if m.distance_squared_to(at) <= gap2:
-				return false
-		return true
+		return not b.net.near_road(at, gap)
 	var first_side := 1.0 if randf() < 0.5 else -1.0
 	# Try a handful of routes on each side: steeper or shallower, longer or
 	# shorter, until one has room.
@@ -58,10 +52,6 @@ static func _plan_route(b: Build) -> Variant:
 		var end := points[points.size() - 1]
 		# The destination sits just past the end of the road
 		var c := end + Vector2(cos(heading), sin(heading)) * (Destinations.DEST_RADIUS - 40)
-		# Keep destinations level with or behind the junction, so the main road
-		# (which only heads up the map) has plenty of room to steer round them.
-		if c.y < f.p.y - 150:
-			continue
 		var apart := true
 		for z: Vector3 in b.zones:
 			if Vector2(z.x, z.y).distance_to(c) <= z.z + Destinations.DEST_RADIUS:
@@ -77,7 +67,7 @@ static func _plan_route(b: Build) -> Variant:
 		# Nor round (or through) a town's walls
 		for t: Vector3 in b.towns:
 			var walls := Vector2(t.x, t.y)
-			if c.distance_to(walls) < t.z + Destinations.DEST_RADIUS + 80:
+			if c.distance_to(walls) < Towns.CLEAR + Destinations.DEST_RADIUS + 80:
 				road_clear = false
 			for k in range(1, points.size()):
 				if points[k].distance_to(walls) < t.z + SIDE_WIDTH / 2 + 60:
@@ -138,7 +128,7 @@ static func side_road(b: Build) -> Variant:
 	if route == null:
 		return null
 	var road := b.road
-	var metres := Road.along(b.i) / PX_PER_METRE
+	var metres := b.metres
 	var biome: Dictionary = Threat.stage_at(metres).biome
 	var road_views := _draw_route(road, route.points, biome.road)
 	var c: Vector2 = route.c

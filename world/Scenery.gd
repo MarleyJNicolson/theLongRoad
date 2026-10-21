@@ -9,7 +9,7 @@ extends RefCounted
 # base sits at the origin (where it meets the ground) and it rises up the
 # screen.
 
-const SPREAD := 1500.0 # how far from the road the land is dressed (950 in the JS)
+const SPREAD := 1500.0 # how far from a road the land is dressed (950 in the JS)
 const ATTEMPTS := 8 # tries per side for each stretch of road (5 in the JS, over less land)
 
 const BARK := Color("#5c4632")
@@ -50,34 +50,43 @@ const MIXES := {
 var patches: Node2D # ground colour patches lie under everything
 var ground: Node2D
 var upright: Node2D
-var road: Road
+var net: RoadNet
 var get_zones: Callable # areas (camps, roadblocks) to keep clear: Array of Vector3(x, y, radius)
-# { obj, extras, index, x, y, r, big, solids, gather, kind, height }
+# { obj, extras, src (where it was placed from), road, i, cell, x, y, r, big, solids, gather, kind, height }
 var items: Array = []
-var placed_up_to := 0
 var _obstacles: Array = []
 var _obstacles_dirty := true
 # Kept apart from `items` so the per-frame and per-placement checks stay quick
 # with thousands of things about: trees (they fade), things to gather stones
-# from, and grids of big things, road points and zones (see _is_clear).
+# from, and grids of big things and zones (see _is_clear).
 var _trees: Array = []
 var _gatherable: Array = []
 var _big := Grid.new(160)
-var _road := Grid.new(128)
-var _road_filed := 0 # road points filed in _road so far
 var _zones := Grid.new(256)
 var _zones_seen: Variant = null # the zone list _zones was built from
-var _culled_at := -1
+var _todo: Array = [] # road points near you still to dress, nearest first
+var _wild := {} # wild cells (away from any road) dressed so far
+var _scan := 0
+var _cull := 0
 const BIGGEST := 48.0 # the largest radius of anything big (a ruin)
+
+# The land is dressed as you come near it and cleared once you're well away:
+# along the roads out to SPREAD each side, and more sparsely in the wilds
+# between them, cell by cell.
+const NEAR := 2600.0 # px: road points this close get dressed
+const FAR := 4300.0 # px: things placed from further off than this are cleared away
+const WILD_CELL := 1000.0
+const WILD_ATTEMPTS := 9
+const TOWN_CLEAR := 380.0 # px round a town's middle kept free of trees
 
 
 # `upright_layer` is the depth-sorted layer shared with the people.
-func _init(ground_layer: Node2D, upright_layer: Node2D, road_: Road, get_zones_: Callable = Callable()) -> void:
+func _init(ground_layer: Node2D, upright_layer: Node2D, net_: RoadNet, get_zones_: Callable = Callable()) -> void:
 	patches = Node2D.new()
 	ground_layer.add_child(patches)
 	ground = ground_layer
 	upright = upright_layer
-	road = road_
+	net = net_
 	get_zones = get_zones_ if get_zones_.is_valid() else func() -> Array: return []
 
 
@@ -103,39 +112,79 @@ func clear(zones: Array) -> void:
 	_obstacles_dirty = true
 
 
-# `budget` caps how many stretches of road get dressed this frame, so a
-# freshly generated chunk of road is spread over several frames.
-func update(index: int, budget := 1 << 30) -> void:
-	# Lag behind generation so we can check clearance against upcoming road.
-	while budget > 0 and placed_up_to < road.points.size() - 40:
+# Dress the land round `at` (`budget` road points this frame, so it's spread
+# over several), and clear away what's far behind.
+func update(at: Vector2, budget := 3) -> void:
+	_scan -= 1
+	if _scan <= 0:
+		_scan = 12
+		_todo = []
+		for key: Vector2i in net.points_near(at, NEAR):
+			var road: Road = net.roads[key.x]
+			if not road.placed[key.y] and road.points[key.y].distance_to(at) < NEAR:
+				_todo.append(key)
+		_todo.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
+			return net.roads[a.x].points[a.y].distance_squared_to(at) < net.roads[b.x].points[b.y].distance_squared_to(at))
+		_dress_wilds(at)
+	while budget > 0 and not _todo.is_empty():
+		var key: Vector2i = _todo.pop_front()
+		var road: Road = net.roads[key.x]
+		if road.placed[key.y]:
+			continue
+		road.placed[key.y] = 1
 		budget -= 1
-		_place_around(placed_up_to)
-		placed_up_to += 1
-	# Clear away what's long behind (only when the road index moves on)
-	if index == _culled_at:
-		return
-	_culled_at = index
+		if key.y % 2 == 0: # (every other point: the spread is wide, the points close)
+			_place_around(road, key.y)
+	_cull -= 1
+	if _cull <= 0:
+		_cull = 40
+		_clear_far(at)
+
+
+# Everything round `at`, at once (the start of a run, or after a jump).
+func fill(at: Vector2) -> void:
+	_scan = 0
+	update(at, 1 << 30)
+
+
+func _clear_far(at: Vector2) -> void:
+	var far2 := FAR * FAR
 	var before := items.size()
 	items = items.filter(func(item: Dictionary) -> bool:
-		if item.index >= index - 80:
+		if item.src.distance_squared_to(at) < far2:
 			return true
+		if item.road != null:
+			item.road.placed[item.i] = 0
+		if item.cell != null:
+			_wild.erase(item.cell)
 		_remove(item)
 		return false)
+	for cell: Vector2i in _wild.keys():
+		if (Vector2(cell) * WILD_CELL).distance_squared_to(at) > far2:
+			_wild.erase(cell)
 	if items.size() != before:
 		_obstacles_dirty = true
 
 
-# Take an item off the map (and out of the lists and grids that know it).
-func _remove(item: Dictionary) -> void:
-	item.obj.queue_free()
-	for o in item.extras:
-		o.queue_free()
-	if item.height:
-		_trees.erase(item)
-	if item.kind == "rock" or item.kind == "boulder":
-		_gatherable.erase(item)
-	if item.big:
-		_big.remove(Vector2(item.x, item.y), 0, item)
+# The wilds between the roads: thinner, wilder, a cell at a time.
+func _dress_wilds(at: Vector2) -> void:
+	var lo := Vector2i(floori((at.x - NEAR) / WILD_CELL), floori((at.y - NEAR) / WILD_CELL))
+	var hi := Vector2i(floori((at.x + NEAR) / WILD_CELL), floori((at.y + NEAR) / WILD_CELL))
+	for cx in range(lo.x, hi.x + 1):
+		for cy in range(lo.y, hi.y + 1):
+			var cell := Vector2i(cx, cy)
+			if _wild.has(cell):
+				continue
+			_wild[cell] = true
+			var centre := (Vector2(cell) + Vector2(0.5, 0.5)) * WILD_CELL
+			if net.near_road(centre, SPREAD + WILD_CELL * 0.5):
+				continue # (the roadside dressing reaches here)
+			var biome: Dictionary = Threat.stage_at(RoadNet.metres_at(centre.y)).biome
+			var mix: Dictionary = MIXES.get(biome.name, MIXES["The Meadows"])
+			for k in WILD_ATTEMPTS:
+				var x := (cx + randf()) * WILD_CELL
+				var y := (cy + randf()) * WILD_CELL
+				_place(_choose(mix), x, y, null, -1, cell, Vector2(centre), biome)
 
 
 # Trees you're standing behind fade, so you never lose sight of yourself.
@@ -156,10 +205,23 @@ func fade_around(x: float, y: float) -> void:
 	_fading = looked.keys().filter(func(item: Dictionary) -> bool: return item.obj.modulate.a < 0.999)
 
 
-func _place_around(i: int) -> void:
+# Take an item off the map (and out of the lists and grids that know it).
+func _remove(item: Dictionary) -> void:
+	item.obj.queue_free()
+	for o in item.extras:
+		o.queue_free()
+	if item.height:
+		_trees.erase(item)
+	if item.kind == "rock" or item.kind == "boulder":
+		_gatherable.erase(item)
+	if item.big:
+		_big.remove(Vector2(item.x, item.y), 0, item)
+
+
+func _place_around(road: Road, i: int) -> void:
 	var p := road.points[i]
 	var n := road.normal(i)
-	var biome: Dictionary = Threat.stage_at(Road.along(i) / 20.0).biome
+	var biome: Dictionary = Threat.stage_at(RoadNet.metres_at(p.y)).biome
 	var mix: Dictionary = MIXES.get(biome.name, MIXES["The Meadows"])
 	for side: float in [-1.0, 1.0]:
 		for k in ATTEMPTS:
@@ -169,12 +231,12 @@ func _place_around(i: int) -> void:
 			var x := p.x + n.x * offset * side + randf_range(-15, 15)
 			var y := p.y + n.y * offset * side + randf_range(-15, 15)
 			var f: Dictionary = FEATURES[feature]
-			if _place(feature, x, y, i, biome) and f.has("grove") and randf() < f.grove:
+			if _place(feature, x, y, road, i, null, p, biome) and f.has("grove") and randf() < f.grove:
 				# Trees like company
 				for g in floori(randf_range(2, 5)):
 					var a := randf() * TAU
 					var d := randf_range(40, 90)
-					_place(feature, x + cos(a) * d, y + sin(a) * d, i, biome)
+					_place(feature, x + cos(a) * d, y + sin(a) * d, road, i, null, p, biome)
 
 
 static func _choose(mix: Dictionary) -> String:
@@ -189,11 +251,11 @@ static func _choose(mix: Dictionary) -> String:
 	return "tufts"
 
 
-func _place(feature: String, x: float, y: float, i: int, biome: Dictionary) -> bool:
+func _place(feature: String, x: float, y: float, road: Variant, i: int, cell: Variant, src: Vector2, biome: Dictionary) -> bool:
 	var f: Dictionary = FEATURES[feature]
 	var r := randf_range(f.size[0], f.size[1])
 	var big: bool = f.has("solid") or f.has("parts")
-	if not _is_clear(x, y, i, 0.0 if f.has("flat") else r + 12, r if big else 0.0):
+	if not _is_clear(x, y, 0.0 if f.has("flat") else r + 12, r if big else 0.0):
 		return false
 
 	var drawn: Dictionary = _draw_feature(feature, r, biome)
@@ -220,7 +282,7 @@ func _place(feature: String, x: float, y: float, i: int, biome: Dictionary) -> b
 		solids = [Vector3(x, y, r * f.solid[0] + f.solid[1])]
 	var gather := randi_range(f.stones[0], f.stones[1]) if f.has("stones") else 0
 	var height: float = drawn.get("height", 0.0) if f.has("tree") else 0.0 # only trees fade (see fade_around)
-	var item := {"obj": obj, "extras": extras, "index": i, "x": x, "y": y, "r": r, "big": big,
+	var item := {"obj": obj, "extras": extras, "src": src, "road": road, "i": i, "cell": cell, "x": x, "y": y, "r": r, "big": big,
 		"solids": solids, "gather": gather, "kind": feature, "height": height}
 	items.append(item)
 	if height:
@@ -262,10 +324,10 @@ func quarry(item: Dictionary, taken: int) -> void:
 			item.obj.circle(Vector2(randf_range(-item.r, item.r) * 0.8, -item.r * randf_range(0.1, 1.1)), randf_range(1, 2.5), Color("#a8a59a"))
 
 
-# Clear of the road, encounters, and (for big things) other big things. (The
-# JS checked 140 road points and the last 400 things every time; here grids
-# narrow it to what's nearby.)
-func _is_clear(x: float, y: float, i: int, margin: float, room: float) -> bool:
+# Clear of every road, the towns, encounters, and (for big things) other big
+# things. (The JS checked 140 road points and the last 400 things every time;
+# here grids narrow it to what's nearby.)
+func _is_clear(x: float, y: float, margin: float, room: float) -> bool:
 	var at := Vector2(x, y)
 	# Encounter zones: refiled whenever the list of them changes
 	var zones: Array = get_zones.call()
@@ -277,13 +339,10 @@ func _is_clear(x: float, y: float, i: int, margin: float, room: float) -> bool:
 	for z: Vector3 in _zones.near(at, margin):
 		if Vector2(z.x, z.y).distance_to(at) < z.z + margin:
 			return false
-	# The road (filed as far as it goes)
-	while _road_filed < road.points.size():
-		_road.add(road.points[_road_filed], 0, _road_filed)
-		_road_filed += 1
-	var road_reach := Road.ROAD_WIDTH / 2 + margin
-	for j: int in _road.near(at, road_reach):
-		if road.points[j].distance_squared_to(at) < road_reach * road_reach:
+	if net.near_road(at, Road.ROAD_WIDTH / 2 + margin):
+		return false
+	for t in net.towns:
+		if t.pos.distance_squared_to(at) < (TOWN_CLEAR + margin) * (TOWN_CLEAR + margin):
 			return false
 	if room:
 		for o: Dictionary in _big.near(at, (BIGGEST + room) * 0.8):

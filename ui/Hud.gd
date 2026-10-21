@@ -16,8 +16,8 @@ const STAMINA_FILL := [Color("#f0d36a"), Color("#c9a227")]
 const BOOST_FILL := [Color("#ffe98a"), Color("#e8b923")]
 const WINDED_FILL := Color("#8a7a5a")
 const EMPTY := Color("#cf5528")
-const FOOT_CONTROLS := "WASD walk · Shift sprint · Ctrl/Space dash · E interact · Click attack · Right mouse shield · R swap · B bag · C cart"
-const CART_CONTROLS := "W/S speed · A/D steer · Shift gallop · E get off · Click attack · Right mouse shield · R swap · B bag · C cart"
+const FOOT_CONTROLS := "WASD walk · Shift sprint · Ctrl/Space dash · E interact · Click attack · Right mouse shield · R swap · B bag · C cart · Tab map"
+const CART_CONTROLS := "W/S speed · A/D steer · Shift gallop · E get off · Click attack · Right mouse shield · R swap · B bag · C cart · Tab map"
 const DEV_KEYS := "F2 / F3 weapons · F4 raiders · F5 huge wave\nF6 off hand · F7 archer · F8 armour\nF9 next town · F10 dev mode off · F11 horn band\nF1 filter · 1-4 zoom (or scroll) · M sound"
 
 
@@ -82,6 +82,7 @@ var _overlay: Control
 var _over_box: VBoxContainer
 var _over_key := ""
 var _name_box: LineEdit
+var _map: Control
 
 
 func _init(game_: Game) -> void:
@@ -258,6 +259,12 @@ func _build() -> void:
 		add_child(panel)
 	move_child(trade, -1)
 
+	# The zone map (Tab), over the play
+	_map = Drawn.new(Vector2.ZERO, _draw_map)
+	_map.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_map.visible = false
+	_add(_map)
+
 	# Game over, over everything
 	_overlay = Control.new()
 	_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -387,6 +394,7 @@ func _refresh() -> void:
 	var from := equipment.position.x + equipment.size.x + 12 * dpr
 	_controls.position = Vector2(maxf(from, from + (W - from - _controls.size.x) / 2), H - 16 * dpr - _controls.size.y)
 
+	_map.visible = g.map_open and not over
 	_overlay.visible = over
 	if over:
 		_refresh_over()
@@ -497,6 +505,77 @@ func _sign() -> void:
 		var name := _name_box.text
 		_name_box.release_focus()
 		game.save_run(name.replace("|", ""))
+
+
+# --- The map ----------------------------------------------------------------------------
+
+# The zone you're in (and the one behind): its roads, its towns by name, the
+# gate north, and you.
+func _draw_map(c: Control) -> void:
+	var g := game
+	var net: RoadNet = g.net
+	var W := c.size.x
+	var H := c.size.y
+	c.draw_rect(Rect2(Vector2.ZERO, c.size), Color(0.07, 0.05, 0.04, 0.82))
+	var paper := Rect2(W * 0.08, H * 0.06, W * 0.84, H * 0.86)
+	c.draw_rect(paper, Color("#d9c7a0"))
+	c.draw_rect(paper.grow(-4 * dpr), Color("#e6d6b0"))
+	c.draw_rect(paper, Color("#5e4a33"), false, 3 * dpr)
+	# The bounds of what's shown: this zone's towns
+	var shown: Array = net.towns.filter(func(t: Dictionary) -> bool: return t.zone == net.zone or (t.kind == "final" and t.zone == net.zone - 1))
+	var lo := Vector2(INF, INF)
+	var hi := Vector2(-INF, -INF)
+	for t in shown:
+		lo = lo.min(t.pos)
+		hi = hi.max(t.pos)
+	var me := Vector2(g.player().x, g.player().y)
+	lo = lo.min(me)
+	hi = hi.max(me)
+	var inner := Rect2(paper.position + Vector2(60, 110) * dpr, paper.size - Vector2(120, 160) * dpr)
+	var span := (hi - lo).max(Vector2(1, 1))
+	var k := minf(inner.size.x / span.x, inner.size.y / span.y)
+	var origin := inner.position + (inner.size - span * k) / 2
+	var to_map := func(p: Vector2) -> Vector2: return origin + (p - lo) * k
+	# Roads: north ones dark, those across the zone in rust
+	for road: Road in net.roads:
+		if road.from_town.zone < net.zone - 1:
+			continue
+		var line := PackedVector2Array()
+		for i in range(0, road.points.size(), 6):
+			line.append(to_map.call(road.points[i]))
+		line.append(to_map.call(road.points[road.points.size() - 1]))
+		c.draw_polyline(line, Color("#5e4a33") if road.kind == "north" else Color("#9a5a2a"), 3 * dpr, true)
+	# Towns
+	var font := Fonts.ui(600)
+	for t in shown:
+		var at: Vector2 = to_map.call(t.pos)
+		var gate: bool = t.kind == "final"
+		var here: bool = g.town != null and g.town.id == t.id
+		var r := (11.0 if gate else 8.0) * dpr
+		c.draw_circle(at, r + 2 * dpr, Color("#3d2f25"))
+		c.draw_circle(at, r, Color("#7a1f1f") if gate else (Color("#c9a227") if here else Color("#f3e3c0")))
+		var label: String = t.name + ("  (gate north)" if gate else "")
+		var size_ := roundi(15 * dpr)
+		var w := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, size_).x
+		c.draw_string(font, at + Vector2(-w / 2, -r - 6 * dpr), label, HORIZONTAL_ALIGNMENT_LEFT, -1, size_, Color("#2a1f14"))
+	# You: an arrowhead pointing the way the cart faces
+	var you: Vector2 = to_map.call(me)
+	var ang: float = g.cart.heading if not g.on_foot else g.peasant.facing
+	var tip := PackedVector2Array()
+	for p in [Vector2(10, 0), Vector2(-7, -6), Vector2(-4, 0), Vector2(-7, 6)]:
+		tip.append(you + (p * dpr).rotated(ang))
+	c.draw_colored_polygon(tip, Color("#c0392b"))
+	c.draw_polyline(tip + PackedVector2Array([tip[0]]), INK, 1.5 * dpr)
+	# Title, compass and key
+	var title := "Region %d · %s" % [net.zone + 1, Threat.stage_at(g.metres).name]
+	var tf := Fonts.title()
+	var ts := roundi(34 * dpr)
+	var tw := tf.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, ts).x
+	c.draw_string(tf, Vector2(W / 2 - tw / 2, paper.position.y + 40 * dpr), title, HORIZONTAL_ALIGNMENT_LEFT, -1, ts, Color("#3d2f25"))
+	var key := "N ↑   ·   dark: roads north   ·   rust: roads across (more towns, richer pickings)   ·   Tab to close"
+	var ks := roundi(13 * dpr)
+	var kw := font.get_string_size(key, HORIZONTAL_ALIGNMENT_LEFT, -1, ks).x
+	c.draw_string(font, Vector2(W / 2 - kw / 2, paper.end.y - 14 * dpr), key, HORIZONTAL_ALIGNMENT_LEFT, -1, ks, Color("#5e4a33"))
 
 
 # --- Drawing ------------------------------------------------------------------------

@@ -62,7 +62,8 @@ var actors: Node2D
 var canopy: Node2D
 var air: Node2D
 
-var road: Road
+var net: RoadNet # the roads and towns of each zone
+var map_open := false # the zone map (Tab)
 var scenery: Scenery
 var encounters: Encounters
 var solids := Obstacles.new() # everything solid, for quick lookups nearby
@@ -87,8 +88,7 @@ var dash_guard := 0.0 # untouchable while dashing
 var puffs: Array = [] # { g, t }
 var interaction: Variant = null # what pressing E would do: { label, x, y, act }
 var toast: Variant = null # { text, t }
-var road_index := 3
-var best := 0.0 # furthest progress along the main road (px)
+var best := 0.0 # furthest north you've come (px north of where you started)
 var metres := 0
 var stamina := 1.0
 var stamina_rest := 0.0
@@ -180,19 +180,18 @@ func reset() -> void:
 	canopy = _layer("Canopy")
 	air = _layer("Air")
 
-	road = Road.new(road_edge, road_fill)
-	road.ensure_ahead(0)
+	net = RoadNet.new(road_edge, road_fill)
+	var first_roads := net.add_zone(debug_zone)
 	enemies = Enemies.new(raiders, fallen)
-	encounters = Encounters.new(props, raiders, road, enemies)
-	encounters.place() # before the scenery, so trees keep out of camps
-	scenery = Scenery.new(ground, raiders, road, encounters.zones) # trees stand among the people
+	encounters = Encounters.new(props, raiders, net, enemies)
+	encounters.add_roads(first_roads)
+	scenery = Scenery.new(ground, raiders, net, encounters.zones) # trees stand among the people
 	encounters.on_new_zones = scenery.clear
-	scenery.update(0)
 	solids = Obstacles.new()
 	solids.refresh(scenery.obstacles(), encounters.obstacles())
 	trading = null
 	town = null
-	war_bands = WarBands.new(enemies, road)
+	war_bands = WarBands.new(enemies, net)
 	clock = start_clock
 	was_night = DayNight.is_night(clock)
 	rest_fade = 0.0
@@ -204,8 +203,11 @@ func reset() -> void:
 	aim.add_child(aim_line)
 	pickups = []
 
-	var start := road.points[3]
-	cart = HorseCart.new(raiders, start.x, start.y, -PI / 2) # depth-sorted with the people
+	# Setting out from the zone's first town, facing up the road north
+	var home: Dictionary = net.towns[0]
+	var north: Road = home.roads[0]
+	var start: Vector2 = home.pos + (north.points[0] - home.pos).normalized() * 30
+	cart = HorseCart.new(raiders, start.x, start.y, (north.points[3] - start).angle()) # depth-sorted with the people
 	peasant = Peasant.new() # among the raiders, so they overlap by depth
 	raiders.add_child(peasant)
 	marker = Painter.new(_draw_marker)
@@ -219,9 +221,9 @@ func reset() -> void:
 	puffs = []
 	interaction = null
 	toast = null
-	road_index = 3
-	best = Road.start_along
+	best = -start.y
 	metres = floori(best / PX_PER_METRE)
+	map_open = false
 	stamina = 1.0
 	stamina_rest = 0.0
 	winded = false
@@ -278,6 +280,10 @@ func reset() -> void:
 					add_to_bag({"type": thing, "count": 3})
 				else:
 					add_to_bag({"type": "gear", "item": Items.named(thing)})
+	# The first town stands round you, then the land round it
+	encounters.update(0.0, player())
+	scenery.fill(start)
+	net.update_view(start)
 
 
 func _exit_tree() -> void:
@@ -300,6 +306,12 @@ func _process(delta: float) -> void:
 		if Controls.pressed("restart") and not typing:
 			reset()
 		return
+	if Controls.pressed("map"):
+		map_open = not map_open
+	if map_open:
+		if Controls.pressed("close"):
+			map_open = false
+		return # (the road waits while you read the map)
 	time += dt
 	_mark("")
 	_update_sky(dt)
@@ -319,10 +331,14 @@ func _process(delta: float) -> void:
 		"right": Controls.held("right"),
 	}
 	if debug_autodrive and not on_foot:
-		var ahead := road.points[mini(road_index + 4, road.points.size() - 1)]
-		var turn := wrapf((ahead - Vector2(cart.x, cart.y)).angle() - cart.heading, -PI, PI)
-		keys.left = turn < -0.05
-		keys.right = turn > 0.05
+		var on := net.nearest(Vector2(cart.x, cart.y), 400.0)
+		if on.road != null:
+			var r: Road = on.road
+			var way := 1 if r.direction(on.index).dot(Vector2.from_angle(cart.heading)) >= 0 else -1
+			var ahead := r.points[clampi(on.index + 4 * way, 0, r.points.size() - 1)]
+			var turn := wrapf((ahead - Vector2(cart.x, cart.y)).angle() - cart.heading, -PI, PI)
+			keys.left = turn < -0.05
+			keys.right = turn > 0.05
 	keys.boost = _update_stamina(dt, keys)
 	galloping = keys.boost
 	if not on_foot:
@@ -351,10 +367,11 @@ func _process(delta: float) -> void:
 	blocking = shield() != null and Controls.held("block") and not pointer_over_ui and not out_of_breath
 
 	_mark("input")
-	var near := road.nearest(cart.x, cart.y, road_index)
-	road_index = near.index
+	var near := net.nearest(Vector2(cart.x, cart.y))
 	var on_main_road: bool = near.dist < Road.ROAD_WIDTH / 2 + 4
-	var on_road := on_main_road or encounters.on_side_road(Vector2(cart.x, cart.y))
+	# (A town's plaza is as good as road)
+	var on_road := on_main_road or encounters.on_side_road(Vector2(cart.x, cart.y)) \
+		or (town != null and Vector2(cart.x, cart.y).distance_to(Vector2(town.safe.x, town.safe.y)) < 140)
 	_mark("road.nearest")
 
 	cart.update(dt, {} if on_foot else keys, on_road, solids.near(Vector2(cart.x, cart.y), 170), on_foot)
@@ -369,29 +386,26 @@ func _process(delta: float) -> void:
 		sprinting = false
 	_mark("cart+peasant")
 
-	if on_main_road:
-		best = maxf(best, near.along)
+	best = maxf(best, -cart.y)
 	metres = floori(best / PX_PER_METRE)
 
-	road.ensure_ahead(road_index)
-	road.cull(road_index)
+	var from := player()
+	net.update_view(cam)
 	_mark("road")
-	encounters.place()
-	_mark("encounters.place")
-	scenery.update(road_index, 1) # (one stretch a frame: the road only needs ~8 a second)
+	encounters.update(dt, from) # (before the scenery, so trees keep out of camps)
+	_mark("encounters.update")
+	scenery.update(Vector2(from.x, from.y))
 	_mark("scenery.update")
 
-	var from := player()
 	_update_throwing(dt, from)
-	Enemies.safe_zones = encounters.towns().map(func(t: Dictionary) -> Vector3: return t.safe)
-	encounters.update(dt, from, road_index)
+	Enemies.safe_zones = net.town_circles(Towns.RADIUS)
 	_mark("encounters.update")
 	var here: Variant = encounters.town_at(Vector2(from.x, from.y))
 	if here and here != town:
 		_arrive(here)
 	town = here
 	war_bands.update(dt, DayNight.is_night(clock), {"pos": Vector2(from.x, from.y), "on_cart": not on_foot, "sprinting": sprinting},
-		road_index, metres, encounters.towns().map(func(t: Dictionary) -> Vector3: return t.safe))
+		metres, net.town_circles(Towns.RADIUS))
 	for message in war_bands.messages:
 		say(message)
 	war_bands.messages.clear()
@@ -518,7 +532,7 @@ func search(chest: Dictionary) -> void:
 
 	var note := ""
 	if randf() < ITEM_CHANCE:
-		var item := Items.roll_item(best / PX_PER_METRE)
+		var item := Items.roll_item(best / PX_PER_METRE + (900.0 if chest.get("rich", false) else 0.0))
 		var worn: Variant = equipment[item.slot]
 		if not worn or item.tier > worn.tier:
 			equipment[item.slot] = item
@@ -610,7 +624,13 @@ func _arrive(place: Dictionary) -> void:
 	winded = false
 	breath = 1.0
 	out_of_breath = false
-	banner = {"title": place.name, "sub": Towns.MOTTO, "t": STAGE_BANNER_TIME}
+	var gate: bool = place.kind == "final"
+	banner = {"title": place.name, "sub": Towns.GATE_MOTTO if gate else Towns.MOTTO, "t": STAGE_BANNER_TIME}
+	# The gate north: the next zone opens up beyond it
+	if gate and place.zone == net.zone:
+		var onward: Dictionary = net.towns[place.id]
+		encounters.add_roads(net.add_zone(net.zone + 1, onward))
+		say("The roads of the next region lie open to the north")
 	if mended:
 		say("The folk of %s mend your cart and bind your wounds" % place.name, 1.5)
 	else:
@@ -1645,7 +1665,8 @@ func speed_kmh() -> int:
 # --- Camera ---------------------------------------------------------------
 
 # Debug: keys 1-4 zoom in to inspect detail. Also `-- --zoom=N`, and
-# `--metres=N` to start that far along the road.
+# `--metres=N` to start in the zone that far north.
+var debug_zone := 0
 var debug_zoom := 1.0
 
 
@@ -1656,7 +1677,7 @@ func _read_debug_args() -> void:
 		elif arg.begins_with("--clock="):
 			start_clock = float(arg.trim_prefix("--clock="))
 		elif arg.begins_with("--metres="):
-			Road.start_along = float(arg.trim_prefix("--metres=")) * PX_PER_METRE
+			debug_zone = floori(float(arg.trim_prefix("--metres=")) / RoadNet.ZONE_METRES)
 		elif arg.begins_with("--visit="):
 			var which := arg.trim_prefix("--visit=")
 			debug_visit = -2 if which == "town" else int(which)
@@ -1765,33 +1786,39 @@ func _debug_cycle(slot: String, names: Array) -> void:
 
 # Debug: F5 sends a huge wave at you from all sides, to feel the scale: the
 # region's raiders, with archers and heavies among them.
-# F9: skip ahead to just outside the next town's gate, cart, companions, gear
-# and all (on foot, you're put back on the cart). The road between is passed
-# over: nothing is placed on it.
+# F9: skip ahead to just outside the gate of the nearest town to the north,
+# cart, companions, gear and all (on foot, you're put back on the cart).
 func debug_next_town() -> void:
 	if state == "over":
 		return
-	var town_px := Towns.next_along(Road.along(road_index) + Towns.CLEAR)
-	var town_i := roundi((town_px - Road.start_along) / Road.SEGMENT)
-	var i := town_i - ceili((Towns.RADIUS + 160) / Road.SEGMENT)
-	if i <= road_index:
+	var here := Vector2(cart.x, cart.y)
+	var target: Variant = null
+	for t in net.towns:
+		if t.pos.y < here.y - 3000 and (target == null or t.pos.distance_to(here) < target.pos.distance_to(here)):
+			target = t
+	if target == null:
 		return
-	road.ensure_ahead(town_i + 40)
-	encounters.skip_to(i)
-	scenery.placed_up_to = maxi(scenery.placed_up_to, i - 60)
+	# Come in by a road from the south, just outside the gate
+	var road: Road = target.roads[0]
+	for r: Road in target.roads:
+		var other: Dictionary = r.from_town if r.to_town == target else r.to_town
+		if other.pos.y > target.pos.y:
+			road = r
+	var into_end: bool = road.to_town == target
+	var gap := ceili((Towns.RADIUS + 200) / Road.SEGMENT)
+	var i := road.points.size() - 1 - gap if into_end else gap
+	var p: Vector2 = road.points[i]
 	if on_foot:
 		mount()
-	var p: Vector2 = road.points[i]
-	cart.place_at(p.x, p.y, road.direction(i).angle())
-	road_index = i
-	best = maxf(best, Road.along(i))
+	cart.place_at(p.x, p.y, (target.pos - p).angle())
+	best = maxf(best, -p.y)
 	metres = floori(best / PX_PER_METRE)
 	cam = p
 	trading = null
-	encounters.place()
-	scenery.update(i)
-	road.cull(i)
-	say("You press on to %s" % Towns.town_name(town_px))
+	encounters.update(0.0, player())
+	scenery.fill(p)
+	net.update_view(p)
+	say("You press on to %s" % target.name)
 
 
 # F8: put on the next tier of every piece of armour (then none again).

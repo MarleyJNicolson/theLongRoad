@@ -39,7 +39,7 @@ const HORN_TIME := 5.0
 const HORDE_RING := Vector2(650, 950) # px from you that the horde comes in from
 
 var enemies: Enemies
-var road: Road
+var net: RoadNet
 # { members, leader, home (shared), route, leg, ahead, heading, engaged,
 #   suspicion, lost, query (the "?") }
 var bands: Array = []
@@ -48,19 +48,19 @@ var messages: Array = [] # things to tell you (Game shows them)
 var jolt := 0.0 # a shake of the screen, asked for (the horn)
 
 
-func _init(enemies_: Enemies, road_: Road) -> void:
+func _init(enemies_: Enemies, net_: RoadNet) -> void:
 	enemies = enemies_
-	road = road_
+	net = net_
 
 
 # `night`: whether war bands are abroad. `me`: { pos, on_cart, sprinting }.
 # `towns`: Vector3(x, y, radius).
-func update(dt: float, night: bool, me: Dictionary, road_index: int, metres: float, towns: Array) -> void:
+func update(dt: float, night: bool, me: Dictionary, metres: float, towns: Array) -> void:
 	var meadows: bool = Threat.stage_at(metres).biome.name == "The Meadows"
 	if night:
 		timer -= dt
 		if timer <= 0 and bands.size() < (1 if meadows else MAX_BANDS):
-			_spawn(me.pos, road_index, metres, towns, meadows)
+			_spawn(me.pos, metres, towns, meadows)
 			timer = randf_range(EVERY.x, EVERY.y)
 	else:
 		timer = FIRST_DELAY
@@ -273,10 +273,14 @@ func _show_query(band: Dictionary) -> void:
 	q.scale = Vector2.ONE * (1 + band.suspicion * 0.4)
 
 
-func _spawn(player: Vector2, road_index: int, metres: float, towns: Array, meadows: bool) -> void:
-	# A stretch of road ahead (now and then behind) to patrol beside
-	var ahead := randf() > 0.2
-	var start := road_index + (randi_range(24, 40) if ahead else -randi_range(30, 40))
+func _spawn(player: Vector2, metres: float, towns: Array, meadows: bool) -> void:
+	# A stretch of the road you're on (or nearest), one way or the other, to
+	# patrol beside
+	var near := net.nearest(player, 3000.0)
+	if near.road == null:
+		return
+	var road: Road = near.road
+	var start: int = near.index + (randi_range(24, 40) if randf() < 0.5 else -randi_range(30, 40) - 26)
 	var length := 26
 	if start < 1 or start + length >= road.points.size() - 1:
 		return

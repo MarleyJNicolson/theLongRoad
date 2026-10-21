@@ -23,7 +23,7 @@ static func _lure(b: Build, faction: String) -> Variant:
 	if spot == null:
 		return null
 	var c := Vector2(spot.x, spot.y)
-	var biome: Dictionary = Threat.stage_at(Road.along(b.i) / 20.0).biome
+	var biome: Dictionary = Threat.stage_at(b.metres).biome
 
 	# A small clearing, and whatever its last visitor left behind
 	var clearing := b.merged(0.4)

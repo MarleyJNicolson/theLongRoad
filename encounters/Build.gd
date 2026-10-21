@@ -12,7 +12,10 @@ const DEEP_CHEST_CHANCE := 0.9
 var layer: Node2D # this encounter's ground view (in the flat props layer)
 var upright: Node2D # the y-sorted layer shared with the people
 var road: Road
-var i: int # the main-road point it's placed at
+var i: int # the road point it's placed at
+var net: RoadNet # every road (to keep clear of them all)
+var metres := 0.0 # how far north
+var rich := false # on a road across the zone: better pickings
 var zones: Array # Vector3(x, y, radius) to keep clear of
 var towns: Array = [] # towns' walls, Vector3(x, y, radius): side roads keep well clear
 var difficulty: float # +1 per 500 m
@@ -102,6 +105,8 @@ func side_that_fits(offset: float) -> float:
 	var f := frame()
 	var fits := func(s: float) -> bool:
 		var at := f.p + f.n * s * offset
+		if net != null:
+			return not net.near_road(at, offset - 10)
 		for j in range(maxi(0, i - 40), mini(road.points.size(), i + 40)):
 			if road.points[j].distance_to(at) <= offset - 10:
 				return false
@@ -136,6 +141,9 @@ func set_back(near: float, radius: float, deep_only := false, far := 700.0) -> V
 			if Vector2(z.x, z.y).distance_to(at) <= z.z + radius:
 				clear = false
 				break
+		for t: Vector3 in towns:
+			if Vector2(t.x, t.y).distance_to(at) <= Towns.CLEAR + radius:
+				clear = false
 		if not clear:
 			continue
 		var deep := offset > near + 60

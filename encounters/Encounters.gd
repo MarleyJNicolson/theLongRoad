@@ -1,19 +1,16 @@
 class_name Encounters
 extends RefCounted
 
-# Places goblin and bandit encounters along the road ahead, keeps trees out of
-# their way, and alerts each group when the cart arrives (port of
-# encounters/index.js).
+# Places goblin and bandit encounters along the roads, builds the towns, keeps
+# trees out of their way, and alerts each group when the cart arrives (port of
+# encounters/index.js, for a network of roads rather than one).
 #
 # An encounter is a Dictionary: { view, members, solids, loot, zones, trigger
 # (Vector3 x, y, radius), animate(time, dt)?, engage()?, reward?, on_cleared()?,
-# traders?, side_road?, road_views?, uprights, index, kind, cleared }.
+# traders?, side_road?, road_views?, uprights, at, kind, cleared }.
 
-const FIRST_AT := 45 # road point index of the first encounter
-const SIDE_ROAD_CHANCE := 0.22 # of an encounter being a turning to somewhere bigger
-const SIDE_ROADS_FROM := 300.0 # metres
-const FIRST_SIDE_ROAD_BY := 450.0 # metres: there's always one early on
-const MAX_SIDE_ROAD_GAP := 600.0 # metres: never longer than this without one
+const SIDE_ROAD_CHANCE := 0.16 # of an encounter being a turning to somewhere bigger
+const SIDE_ROADS_FROM := 150.0 # metres
 
 # Some encounters need room beside the road and can fail to fit; each
 # faction's fallback always fits.
@@ -34,18 +31,27 @@ const FALLBACK := {"goblin": 2, "bandit": 5} # goblinLooters, banditAmbush
 
 var layer: Node2D # flat ground decals
 var upright: Node2D # the depth-sorted layer shared with the people
-var road: Road
+var net: RoadNet
 var enemies: Enemies
 var list: Array = []
-var next_index := FIRST_AT
 var last: Variant = null # the kind placed last (never twice in a row)
 var time := 0.0
 var rewards: Array = [] # { gold, x, y, message? } earned by clearing out raids
 var on_new_zones: Callable # called with zones that appear where scenery already is
-var last_side_road := FIRST_SIDE_ROAD_BY - MAX_SIDE_ROAD_GAP # metres
-var next_town := Towns.next_along(Road.start_along + 1) # px along the road
+# Places along the roads where something will be, made when the zone is:
+# { road, i, enc (once built), spent (built and since cleared away) }
+var slots: Array = []
+var _built_towns := {} # town id -> its encounter
 var _zones_cache: Variant = null # zones(), until the list of encounters changes
 var _solids_cache: Variant = null # obstacles(), likewise
+
+# Encounters are built as you come near (BUILD_NEAR) and cleared away once
+# you're well past (DROP_FAR); one cleared away isn't built again. Towns are
+# built from further off, and kept.
+const BUILD_NEAR := 4600.0
+const DROP_FAR := 9000.0
+const TOWN_NEAR := 7000.0
+const EW_SPACING := 0.8 # roads across the zone have more along them
 
 
 # Encounters came or went: lists built from them need building again.
@@ -54,17 +60,26 @@ func _changed() -> void:
 	_solids_cache = null
 
 
-func _init(layer_: Node2D, upright_: Node2D, road_: Road, enemies_: Enemies) -> void:
+func _init(layer_: Node2D, upright_: Node2D, net_: RoadNet, enemies_: Enemies) -> void:
 	layer = layer_
 	upright = upright_
-	road = road_
+	net = net_
 	enemies = enemies_
 
 
-# Jump ahead to road point `i` (the debug skip to the next town): nothing is
-# placed on the stretch passed over.
-func skip_to(i: int) -> void:
-	next_index = maxi(next_index, i)
+# Lay out where encounters will be along new roads (clear of the towns at
+# either end).
+func add_roads(roads: Array) -> void:
+	var clear := ceili((Towns.CLEAR + 60) / Road.SEGMENT)
+	for road: Road in roads:
+		var i := clear + randi_range(0, 10)
+		while i < road.points.size() - clear:
+			slots.append({"road": road, "i": i, "enc": null, "spent": false})
+			var metres := RoadNet.metres_at(road.points[i].y)
+			var step: float = Threat.threat_at(metres).spacing * randf_range(0.85, 1.2)
+			if road.kind == "ew":
+				step *= EW_SPACING
+			i += maxi(12, floori(step))
 
 
 # Towns on the road so far: { name, safe: Vector3(x, y, radius) }.
@@ -184,80 +199,63 @@ static func _make(entry: Dictionary, b: Build) -> Variant:
 	return null
 
 
-# Place new encounters as soon as their stretch of road exists. Call this
-# before the scenery fills that stretch in, so trees are kept clear.
-func place() -> void:
-	while next_index < road.points.size() - 5:
-		var i := next_index
-		# A town ahead: nothing is placed near it, and it waits until the road
-		# runs right through it
-		var town_i := roundi((next_town - Road.start_along) / Road.SEGMENT)
-		var clear := ceili(Towns.CLEAR / Road.SEGMENT)
-		if i >= town_i - clear:
-			if town_i + clear >= road.points.size() - 5:
-				return
-			if town_i >= 3: # (not one behind where the road starts)
-				_place_town(town_i)
-			next_town = Towns.next_along(next_town + 1)
-			next_index = maxi(i, town_i + clear)
-			continue
-		# No turning off just before a town: what's down it would crowd the walls
-		var town_soon := i >= town_i - clear - ceili((Towns.RADIUS + Destinations.DEST_RADIUS + 400) / Road.SEGMENT)
-		# Raiders are as tough as the stretch of road they're found on.
-		var metres := Road.along(i) / 20.0
-		var threat := Threat.threat_at(metres)
-		var biome: Dictionary = Threat.stage_at(metres).biome
-		enemies.threat = threat
-		var view := Node2D.new()
-		layer.add_child(view)
-		var b := Build.new(view, upright, road, i, zones(), metres / 500.0, threat.extra_members, enemies)
-		b.towns = towns().map(func(t: Dictionary) -> Vector3: return t.safe)
+# Build the encounter for a slot.
+func _build(slot: Dictionary) -> void:
+	var road: Road = slot.road
+	var i: int = slot.i
+	var metres := RoadNet.metres_at(road.points[i].y)
+	var threat := Threat.threat_at(metres)
+	var biome: Dictionary = Threat.stage_at(metres).biome
+	enemies.threat = threat
+	var view := Node2D.new()
+	layer.add_child(view)
+	var b := Build.new(view, upright, road, i, zones() + net.town_circles(Towns.CLEAR), metres / 500.0, threat.extra_members, enemies)
+	b.net = net
+	b.metres = metres
+	b.rich = road.kind == "ew"
+	b.towns = net.town_circles(Towns.RADIUS)
 
-		# Now and then, a turning off to a village or a big camp. Its road runs
-		# back alongside existing road, so clear any trees already there.
-		var enc: Variant = null
-		var entry: Variant = null
-		var overdue := metres - last_side_road >= MAX_SIDE_ROAD_GAP
-		if metres > SIDE_ROADS_FROM and not town_soon and (overdue or randf() < SIDE_ROAD_CHANCE):
-			enc = SideRoads.side_road(b)
-			if enc != null:
-				last_side_road = metres
+	# Now and then, a turning off to a village or a big camp.
+	var enc: Variant = null
+	var entry: Variant = null
+	if metres > SIDE_ROADS_FROM and randf() < SIDE_ROAD_CHANCE:
+		enc = SideRoads.side_road(b)
+	if enc == null:
+		# Never the same kind twice in a row.
+		entry = _pick(last, biome)
+		enc = _make(entry, b)
 		if enc == null:
-			# Never the same kind twice in a row.
-			entry = _pick(last, biome)
+			# Didn't fit: undo whatever it stood up, and fall back
+			b.clear_uprights()
+			for child in view.get_children():
+				child.queue_free()
+			b.g = Sketch.new()
+			view.add_child(b.g)
+			entry = TABLE[FALLBACK[entry.faction]]
 			enc = _make(entry, b)
-			if enc == null:
-				# Didn't fit: undo whatever it stood up, and fall back
-				b.clear_uprights()
-				for child in view.get_children():
-					child.queue_free()
-				b.g = Sketch.new()
-				view.add_child(b.g)
-				entry = TABLE[FALLBACK[entry.faction]]
-				enc = _make(entry, b)
-		enc.view = view
-		enc.index = i
-		enc.uprights = b.uprights
-		enc.kind = entry.kind if entry else "sideRoad"
-		enc.cleared = false
-		for key in ["solids", "loot", "members"]:
-			if not enc.has(key):
-				enc[key] = []
-		_reinforce(enc, threat.reinforce)
-		# Clear any trees already standing in its way (side roads, paths in the wilds)
-		if on_new_zones.is_valid():
-			on_new_zones.call(enc.zones)
-		# Wherever archers are posted, their spare arrows are kept to hand.
-		for m: Enemy in enc.members:
-			if m.shoots:
-				var a := randf() * TAU
-				Loot.add_arrow_barrel(enc.loot, b, Vector2(m.home.x + cos(a) * 30, m.home.y + sin(a) * 30))
-				break
-		list.append(enc)
-		_changed()
-		if entry:
-			last = entry
-		next_index += floori(threat.spacing * randf_range(0.85, 1.2))
+	enc.view = view
+	enc.uprights = b.uprights
+	enc.kind = entry.kind if entry else "sideRoad"
+	enc.cleared = false
+	enc.at = road.points[i]
+	for key in ["solids", "loot", "members"]:
+		if not enc.has(key):
+			enc[key] = []
+	_reinforce(enc, threat.reinforce)
+	# Clear any trees already standing in its way (side roads, paths in the wilds)
+	if on_new_zones.is_valid():
+		on_new_zones.call(enc.zones)
+	# Wherever archers are posted, their spare arrows are kept to hand.
+	for m: Enemy in enc.members:
+		if m.shoots:
+			var a := randf() * TAU
+			Loot.add_arrow_barrel(enc.loot, b, Vector2(m.home.x + cos(a) * 30, m.home.y + sin(a) * 30))
+			break
+	list.append(enc)
+	slot.enc = enc
+	_changed()
+	if entry:
+		last = entry
 
 
 # More of them: copies of the rank and file already there (the leaders stay
@@ -276,20 +274,29 @@ func _reinforce(enc: Dictionary, share: float) -> void:
 		enc.members.append(enemies.add(m.type, at.x, at.y, home))
 
 
-func _place_town(i: int) -> void:
+func _build_town(town: Dictionary) -> void:
 	var view := Node2D.new()
 	layer.add_child(view)
-	var b := Build.new(view, upright, road, i, zones(), 0, 0, enemies)
-	var town := Towns.build(b)
-	town.view = view
-	town.index = i
-	town.uprights = b.uprights
-	town.kind = "town"
-	town.cleared = false
+	var road: Road = town.roads[0]
+	var b := Build.new(view, upright, road, 0, zones(), 0, 0, enemies)
+	b.net = net
+	b.metres = RoadNet.metres_at(town.pos.y)
+	var enc := Towns.build(b, town)
+	enc.view = view
+	enc.uprights = b.uprights
+	enc.kind = "town"
+	enc.cleared = false
+	enc.at = town.pos
 	if on_new_zones.is_valid():
-		on_new_zones.call(town.zones)
-	list.append(town)
+		on_new_zones.call(enc.zones)
+	list.append(enc)
+	_built_towns[town.id] = enc
 	_changed()
+
+
+# The built encounter for a town (null until you've come near it).
+func town_encounter(id: int) -> Variant:
+	return _built_towns.get(id)
 
 
 # Buildings you're standing behind fade, so you never lose sight of yourself.
@@ -304,9 +311,17 @@ func fade_around(x: float, y: float) -> void:
 
 
 # `player` is wherever the peasant is: on the cart or on foot ({ x, y, ... }).
-func update(dt: float, player: Dictionary, road_index: int) -> void:
+func update(dt: float, player: Dictionary) -> void:
 	time += dt
 	var at := Vector2(player.x, player.y)
+	# Build what you're coming near
+	for town in net.towns:
+		if not _built_towns.has(town.id) and town.zone >= net.zone - 1 and town.pos.distance_to(at) < TOWN_NEAR:
+			_build_town(town)
+	for slot in slots:
+		if slot.enc == null and not slot.spent and slot.road.points[slot.i].distance_to(at) < BUILD_NEAR:
+			_build(slot)
+
 	for enc in list:
 		if enc.has("animate"):
 			enc.animate.call(time, dt)
@@ -329,24 +344,37 @@ func update(dt: float, player: Dictionary, road_index: int) -> void:
 				enc.on_cleared.call()
 			rewards.append(enc.reward)
 
+	# Clear away what's far behind (towns only once their zone is two back)
 	var before := list.size()
 	list = list.filter(func(enc: Dictionary) -> bool:
-		if enc.index >= road_index - 70:
+		if enc.has("town"):
+			if enc.town.zone >= net.zone - 1:
+				return true
+			_built_towns.erase(enc.town.id)
+		elif enc.at.distance_to(at) < DROP_FAR:
 			return true
-		enc.view.queue_free()
-		for u in enc.uprights:
-			u.node.queue_free()
-		for v in enc.get("road_views", []):
-			v.queue_free()
-		for m: Enemy in enc.members:
-			m.removed = true
-		# A chest's functions refer back to the chest: clear it so both go
-		for l in enc.loot:
-			l.clear()
-		enc.clear()
+		_drop(enc)
 		return false)
 	if list.size() != before:
+		for slot in slots:
+			if slot.enc != null and slot.enc.is_empty():
+				slot.enc = null
+				slot.spent = true
 		_changed()
+
+
+func _drop(enc: Dictionary) -> void:
+	enc.view.queue_free()
+	for u in enc.uprights:
+		u.node.queue_free()
+	for v in enc.get("road_views", []):
+		v.queue_free()
+	for m: Enemy in enc.members:
+		m.removed = true
+	# A chest's functions refer back to the chest: clear it so both go
+	for l in enc.loot:
+		l.clear()
+	enc.clear()
 
 
 # Let go of everything (a restart, or quitting). A chest's functions refer
