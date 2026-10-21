@@ -43,6 +43,7 @@ var game: Game
 var device_px := 2 # screen pixels per art pixel (set by Main)
 var dpr := 1.0 # screen pixels per CSS pixel (set by Main)
 var trade: TradePanel
+var board_panel: BoardPanel
 var equipment: EquipmentPanel
 var bag: InventoryPanel
 var cart_store: InventoryPanel
@@ -57,6 +58,8 @@ var _distance: Label
 var _speed: Label
 var _kills: Label
 var _gold: Label
+var _honour: Label
+var _supplies: Label
 var _day_small: Label
 var _day: Label
 var _dev: Label
@@ -91,6 +94,8 @@ func _init(game_: Game) -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	trade = TradePanel.new(game)
 	add_child(trade)
+	board_panel = BoardPanel.new(game)
+	add_child(board_panel)
 
 
 func _process(_delta: float) -> void:
@@ -101,6 +106,7 @@ func _process(_delta: float) -> void:
 	cart_store.refresh()
 	quiver.refresh()
 	trade.refresh(game.trade_view(), game.gold, dpr)
+	board_panel.refresh(game.board_view(), dpr)
 	_refresh()
 	queue_redraw()
 
@@ -178,6 +184,9 @@ func _build() -> void:
 	coin_row.add_child(Drawn.new(Vector2(14, 22) * dpr, _draw_coin))
 	coin_row.add_child(_gold)
 	stats.add_child(s[0])
+	s = _stat("Honour", 100, Color("#e6cfff"))
+	_honour = s[2]
+	stats.add_child(s[0])
 	s = _stat("Day", 150)
 	_day_small = s[1]
 	_day = s[2]
@@ -202,7 +211,7 @@ func _build() -> void:
 	var rows := VBoxContainer.new()
 	rows.add_theme_constant_override("separation", roundi(8 * dpr))
 	_vitals.add_child(rows)
-	_rows.you = _row(rows, "You", Drawn.new(Vector2(5 * 20, 20) * dpr, _draw_hearts))
+	_rows.you = _row(rows, "You", Drawn.new(Vector2(7 * 20, 20) * dpr, _draw_hearts))
 	_rows.cart = _row(rows, "Cart", Drawn.new(Vector2(130, 12) * dpr, _draw_cart_bar))
 	_rows.breath = _row(rows, "Stamina", Drawn.new(Vector2(130, 12) * dpr, func(c: Control) -> void:
 		_draw_bar(c, game.breath, WINDED_FILL if game.out_of_breath else (BOOST_FILL if game.sprinting else STAMINA_FILL))))
@@ -224,6 +233,9 @@ func _build() -> void:
 	_crew = _label("", 11, Color(TEXT, 0.85))
 	_crew.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	rows.add_child(_crew)
+	_supplies = _label("", 11, Color("#f6d9a0"))
+	_supplies.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	rows.add_child(_supplies)
 
 	# The region / nightfall banner
 	_banner = VBoxContainer.new()
@@ -258,6 +270,7 @@ func _build() -> void:
 	for panel in [equipment, bag, cart_store, quiver]:
 		add_child(panel)
 	move_child(trade, -1)
+	move_child(board_panel, -1)
 
 	# The zone map (Tab), over the play
 	_map = Drawn.new(Vector2.ZERO, _draw_map)
@@ -335,6 +348,7 @@ func _refresh() -> void:
 	_put(_speed, "%d km/h" % (0 if g.on_foot else g.speed_kmh()))
 	_put(_kills, str(g.kills))
 	_put(_gold, str(g.gold))
+	_put(_honour, "✦ %d" % g.honour)
 	var change := DayNight.until_change(g.clock)
 	var next := "Dawn" if DayNight.is_night(g.clock) or DayNight.phase(g.clock) == "dusk" else "Dusk"
 	_put(_day_small, "DAY %d · %s" % [g.day(), DayNight.phase(g.clock).to_upper()])
@@ -359,6 +373,11 @@ func _refresh() -> void:
 	_put(_ammo_from, "from " + " + ".join(sources))
 	_put(_crew, "" if g.companions.is_empty() else "RIDING WITH YOU   " + " · ".join(g.companions.map(func(c: Companion) -> String: return c.title())))
 	_crew.visible = not g.companions.is_empty()
+	var runs := []
+	for m in g.missions:
+		runs.append("%d → %s" % [m.crates, m.to_name])
+	_put(_supplies, "SUPPLIES %d/%d   %s" % [g.crates_carried(), g.cart_spec().crates, " · ".join(runs)] if not runs.is_empty() else "")
+	_supplies.visible = not runs.is_empty()
 	_vitals.reset_size()
 	_vitals.position = Vector2(W - 16 * dpr - _vitals.size.x, 16 * dpr)
 	_dev.visible = g.dev_mode
@@ -558,6 +577,13 @@ func _draw_map(c: Control) -> void:
 		var size_ := roundi(15 * dpr)
 		var w := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, size_).x
 		c.draw_string(font, at + Vector2(-w / 2, -r - 6 * dpr), label, HORIZONTAL_ALIGNMENT_LEFT, -1, size_, Color("#2a1f14"))
+	# Where your supplies are bound: a gold ring, and how many crates
+	for m in g.missions:
+		var dest: Dictionary = net.towns[m.to_id]
+		var at: Vector2 = to_map.call(dest.pos)
+		c.draw_arc(at, 17 * dpr, 0, TAU, 32, Color("#c9a227"), 3 * dpr, true)
+		var note := "%d %s" % [m.crates, "crate" if m.crates == 1 else "crates"]
+		c.draw_string(font, at + Vector2(-20, 32) * dpr, note, HORIZONTAL_ALIGNMENT_LEFT, -1, roundi(13 * dpr), Color("#7a4a10"))
 	# You: an arrowhead pointing the way the cart faces
 	var you: Vector2 = to_map.call(me)
 	var ang: float = g.cart.heading if not g.on_foot else g.peasant.facing
@@ -572,7 +598,7 @@ func _draw_map(c: Control) -> void:
 	var ts := roundi(34 * dpr)
 	var tw := tf.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, ts).x
 	c.draw_string(tf, Vector2(W / 2 - tw / 2, paper.position.y + 40 * dpr), title, HORIZONTAL_ALIGNMENT_LEFT, -1, ts, Color("#3d2f25"))
-	var key := "N ↑   ·   dark: roads north   ·   rust: roads across (more towns, richer pickings)   ·   Tab to close"
+	var key := "N ↑   ·   dark: roads north   ·   rust: roads across (more towns, richer pickings)   ·   gold ring: your supplies' destination   ·   Tab to close"
 	var ks := roundi(13 * dpr)
 	var kw := font.get_string_size(key, HORIZONTAL_ALIGNMENT_LEFT, -1, ks).x
 	c.draw_string(font, Vector2(W / 2 - kw / 2, paper.end.y - 14 * dpr), key, HORIZONTAL_ALIGNMENT_LEFT, -1, ks, Color("#5e4a33"))
@@ -593,15 +619,16 @@ func _draw_bar(c: Control, fill: float, colours: Variant) -> void:
 
 
 func _draw_cart_bar(c: Control) -> void:
-	_draw_bar(c, float(game.cart_health) / Game.MAX_CART_HEALTH, CART_FILL)
-	for i in range(1, Game.MAX_CART_HEALTH):
-		var x := roundf(c.size.x * i / Game.MAX_CART_HEALTH)
+	var most := game.max_cart_health()
+	_draw_bar(c, float(game.cart_health) / most, CART_FILL)
+	for i in range(1, most):
+		var x := roundf(c.size.x * i / most)
 		c.draw_rect(Rect2(x, 0, maxf(1, dpr), c.size.y), Color(0, 0, 0, 0.4))
 
 
 func _draw_hearts(c: Control) -> void:
 	var s := c.size.y
-	for i in Game.MAX_HEALTH:
+	for i in game.max_health():
 		var colour := HEART if i < game.health else Color(HEART, 0.2)
 		var o := Vector2(i * s + s * 0.5, s * 0.5)
 		var r := s * 0.24

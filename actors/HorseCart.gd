@@ -92,8 +92,11 @@ var cart_front: Painter
 var horse: Painter
 var driver: Node2D # the seat the driver's rig sits on
 var riders: Array = [] # companions in the back (see Companion), each on a seat
-# Seats in the back of the cart, on the cargo (forward, right).
+# Seats in the back of the cart, on the cargo (forward, right), for a farm
+# cart; a bigger wagon spreads them out (see size_k).
 const SEATS := [Vector2(-6, -6), Vector2(-6, 6), Vector2(-15, 0)]
+var size_k := 1.0 # how much bigger than a farm cart (see Carts)
+var crates := 0 # supply crates loaded (see Missions)
 var rig: Rig
 var aim := 0.0 # where the driver is looking, relative to the cart
 var lantern: PointLight2D
@@ -104,8 +107,8 @@ func _init(layer: Node2D, x_: float, y_: float, heading_: float) -> void:
 	y = y_
 	heading = heading_
 	cart_heading = heading_
-	cart_x = x - cos(heading) * (HITCH_LENGTH + 20)
-	cart_y = y - sin(heading) * (HITCH_LENGTH + 20)
+	cart_x = x - cos(heading) * (_hitch() + 20)
+	cart_y = y - sin(heading) * (_hitch() + 20)
 
 	shafts = Painter.new(_draw_shafts)
 	cart = Node2D.new()
@@ -138,8 +141,8 @@ func place_at(x_: float, y_: float, heading_: float) -> void:
 	y = y_
 	heading = heading_
 	cart_heading = heading_
-	cart_x = x - cos(heading) * (HITCH_LENGTH + 20)
-	cart_y = y - sin(heading) * (HITCH_LENGTH + 20)
+	cart_x = x - cos(heading) * (_hitch() + 20)
+	cart_y = y - sin(heading) * (_hitch() + 20)
 	speed = 0.0
 	render()
 
@@ -226,8 +229,8 @@ func update(dt: float, input: Dictionary, on_road: bool, obstacles: Array = [], 
 	var length := d.length()
 	if length == 0.0:
 		length = 1.0
-	cart_x = hitch.x - d.x / length * HITCH_LENGTH
-	cart_y = hitch.y - d.y / length * HITCH_LENGTH
+	cart_x = hitch.x - d.x / length * _hitch()
+	cart_y = hitch.y - d.y / length * _hitch()
 	cart_heading = atan2(d.y, d.x)
 	roll += Vector2(cart_x, cart_y).distance_to(old) / 11.0 * (signf(speed) if speed != 0 else 1.0)
 
@@ -241,8 +244,21 @@ func bodies() -> Array[Vector3]:
 	return [
 		Vector3(x, y, 13),
 		Vector3(x + h.x * 28, y + h.y * 28, 7),
-		Vector3(cart_x, cart_y, 23),
+		Vector3(cart_x, cart_y, 23 * size_k),
 	]
+
+
+# Horse to cart centre: longer for a bigger cart.
+func _hitch() -> float:
+	return HITCH_LENGTH + (size_k - 1) * CART.long
+
+
+# Swap the cart for one `k` times the size (bigger wagons from the wainwright).
+func set_size(k: float) -> void:
+	size_k = k
+	for r in riders:
+		r.rig.seat_z = CART.floor + 7
+	render()
 
 
 # Push the whole rig out of any obstacle it overlaps, and bleed off the part
@@ -279,9 +295,9 @@ func render(dt := 0.0) -> void:
 	cart_back.queue_redraw()
 	cart_front.queue_redraw()
 	var P := View.new(cart_heading)
-	driver.position = P.xy(12, 0)
+	driver.position = P.xy(12 + (size_k - 1) * 14, 0)
 	for r in riders:
-		r.position = P.xy(SEATS[r.seat].x, SEATS[r.seat].y)
+		r.position = P.xy(SEATS[r.seat].x * size_k, SEATS[r.seat].y * size_k)
 	# Everyone aboard sits between the cart's far and near sides, the nearest
 	# to the camera drawn last
 	if riders:
@@ -290,7 +306,7 @@ func render(dt := 0.0) -> void:
 		for n in aboard.size():
 			if aboard[n].get_index() != 1 + n:
 				cart.move_child(aboard[n], 1 + n)
-	lantern.position = View.new(cart_heading).xy(18, 0, 26)
+	lantern.position = View.new(cart_heading).xy(18 + (size_k - 1) * 14, 0, 26)
 	rig.update(dt, cart_heading + aim, 0)
 	# Nearer the bottom of the screen draws in front
 	shafts.position = Vector2((x + cart_x) / 2, (y + cart_y) / 2)
@@ -406,8 +422,8 @@ func _draw_wheel(ci: CanvasItem, P: View, a: float, b: float) -> void:
 # (`behind`), then the walls and wheel in front.
 func _draw_cart(ci: CanvasItem, behind: bool) -> void:
 	var P := View.new(cart_heading)
-	var long: float = CART.long
-	var wide: float = CART.wide
+	var long: float = CART.long * size_k
+	var wide: float = CART.wide * size_k
 	var floor_z: float = CART.floor
 	var rim: float = CART.rim
 	var near_side := 1.0 if P.at(0, 1).z > 0 else -1.0 # which side faces the camera
@@ -442,21 +458,56 @@ func _draw_cart(ci: CanvasItem, behind: bool) -> void:
 		while a < long:
 			ci.draw_line(P.xy(a, -wide, floor_z), P.xy(a, wide, floor_z), CART.inside, 1)
 			a += 7
-		# Cargo: a heap of hay and two sacks
-		var hay := P.xy(-9, -3, floor_z + 5)
-		Draw.ellipse(ci, hay, 10, 7, Color("#d9b44a"))
-		Draw.ellipse(ci, hay - Vector2(2, 2), 5, 3.5, Color("#e6c766"))
-		for s in [Vector2(-12, 8), Vector2(-3, -9)]:
-			var sack := P.xy(s.x, s.y, floor_z + 4)
-			Draw.ellipse(ci, sack, 5, 4.5, Color("#c9b28a"))
-			Draw.ellipse(ci, sack - Vector2(1, 1.5), 2, 1.5, Color("#d6c49c"))
+		if crates > 0:
+			# Supply crates, in pairs back from the bench, a second layer once
+			# the bed's full
+			var spots := []
+			var row := 3.0 + (size_k - 1) * 8
+			while row > -long + 4:
+				for b in [-wide * 0.45, wide * 0.45]:
+					spots.append(Vector2(row, b))
+				row -= 10.5
+			for n in crates:
+				var spot: Vector2 = spots[n % spots.size()]
+				var z := floor_z + 9.0 * floori(float(n) / spots.size())
+				_crate(ci, P, spot, z)
+		else:
+			# Cargo: a heap of hay and two sacks
+			var hay := P.xy(-9, -3, floor_z + 5)
+			Draw.ellipse(ci, hay, 10, 7, Color("#d9b44a"))
+			Draw.ellipse(ci, hay - Vector2(2, 2), 5, 3.5, Color("#e6c766"))
+			for s in [Vector2(-12, 8), Vector2(-3, -9)]:
+				var sack := P.xy(s.x, s.y, floor_z + 4)
+				Draw.ellipse(ci, sack, 5, 4.5, Color("#c9b28a"))
+				Draw.ellipse(ci, sack - Vector2(1, 1.5), 2, 1.5, Color("#d6c49c"))
 		# The driver's bench
-		quad.call([Vector3(15, -wide + 1, floor_z + 8), Vector3(9, -wide + 1, floor_z + 8), Vector3(9, wide - 1, floor_z + 8), Vector3(15, wide - 1, floor_z + 8)], CART.dark)
+		var bench := (size_k - 1) * 14
+		quad.call([Vector3(15 + bench, -wide + 1, floor_z + 8), Vector3(9 + bench, -wide + 1, floor_z + 8), Vector3(9 + bench, wide - 1, floor_z + 8), Vector3(15 + bench, wide - 1, floor_z + 8)], CART.dark)
 	else:
 		# In front: the near walls' outer faces and the near wheel
 		wall.call(walls["right" if near_side > 0 else "left"], CART.wood)
 		wall.call(walls["front" if near_end > 0 else "back"], CART.wood)
 		_draw_wheel(ci, P, -2, near_side * (wide + 2))
+
+
+# A supply crate in the cart bed at `spot` (forward, right), its base at
+# height `z`: lid, two sides, bands across.
+func _crate(ci: CanvasItem, P: View, spot: Vector2, z: float) -> void:
+	var h := 4.2
+	var top := func(a: float, b: float) -> Vector2: return P.xy(spot.x + a, spot.y + b, z + 8)
+	var lid := PackedVector2Array([top.call(h, h), top.call(-h, h), top.call(-h, -h), top.call(h, -h)])
+	# Sides showing towards the camera
+	for side in [[Vector2(h, h), Vector2(-h, h)], [Vector2(h, -h), Vector2(h, h)], [Vector2(-h, h), Vector2(-h, -h)], [Vector2(-h, -h), Vector2(h, -h)]]:
+		var p0: Vector2 = side[0]
+		var p1: Vector2 = side[1]
+		var mid := (p0 + p1) / 2
+		if P.at(spot.x + mid.x * 2, spot.y + mid.y * 2).z <= P.at(spot.x, spot.y).z:
+			continue
+		Draw.convex(ci, PackedVector2Array([P.xy(spot.x + p0.x, spot.y + p0.y, z), P.xy(spot.x + p1.x, spot.y + p1.y, z),
+			P.xy(spot.x + p1.x, spot.y + p1.y, z + 8), P.xy(spot.x + p0.x, spot.y + p0.y, z + 8)]), Color("#8a6236"))
+	Draw.convex(ci, lid, Color("#b8874e"))
+	ci.draw_line(top.call(0, -h), top.call(0, h), Color("#5e3f22"), 1.0)
+	ci.draw_polyline(lid + PackedVector2Array([lid[0]]), Color("#4a3220"), 1.0)
 
 
 # Shafts from the cart to the horse's flanks, and the reins. Drawn relative to
@@ -468,7 +519,7 @@ func _draw_shafts(ci: CanvasItem) -> void:
 	var P := View.new(cart_heading)
 	var H := View.new(heading)
 	for side in [-1.0, 1.0]:
-		Draw.round_line(ci, PackedVector2Array([cart_at + P.xy(CART.long, side * 11, 15), horse_at + H.xy(-3, side * 6.5, 19)]), 2.5, Color("#5a3a1a"))
+		Draw.round_line(ci, PackedVector2Array([cart_at + P.xy(CART.long * size_k, side * 11, 15), horse_at + H.xy(-3, side * 6.5, 19)]), 2.5, Color("#5a3a1a"))
 	if driver.visible:
 		for side in [-1.0, 1.0]:
-			ci.draw_line(cart_at + P.xy(19, side * 3, CART.floor + 15), horse_at + H.xy(22, side * 1.5, 30), Color("#2a180c"), 0.8)
+			ci.draw_line(cart_at + P.xy(19 + (size_k - 1) * 14, side * 3, CART.floor + 15), horse_at + H.xy(22, side * 1.5, 30), Color("#2a180c"), 0.8)

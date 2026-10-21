@@ -128,6 +128,12 @@ var bag_open := false
 var cart_open := false
 var blocking := false # holding a shield up (right mouse)
 var companions: Array = [] # who rides along to defend the cart (see Companion)
+# Supply runs under way: { to_id, to_name, from_name, crates, start, gold, honour }
+var missions: Array = []
+var honour := 0 # earned delivering supplies; spent with the captain at a region's gate
+var cart_tier := 0 # which of Carts.LIST you drive
+var perks := {} # honours bought (see Perks): id -> how many
+var board: Variant = null # the town board you're reading: { kind: missions|wainwright|captain, town }
 # Dev mode (F10): ammunition is never used up, and the debug keys are listed
 var dev_mode := false
 # The scoreboard: the run waiting to be signed (null once it's on the board),
@@ -237,8 +243,8 @@ func reset() -> void:
 
 	state = "playing"
 	over_reason = {}
-	health = MAX_HEALTH
-	cart_health = MAX_CART_HEALTH
+	health = max_health()
+	cart_health = max_cart_health()
 	invulnerable = 0.0
 	block_flash = 0.0
 	kills = 0
@@ -253,6 +259,11 @@ func reset() -> void:
 	swings = []
 	out_of_ammo_at = -9.0
 	companions = []
+	missions = []
+	honour = 0
+	cart_tier = 0
+	perks = {}
+	board = null
 	_dressed_as = []
 	bag = []
 	bag.resize(Items.BAG_SIZE)
@@ -358,6 +369,7 @@ func _process(delta: float) -> void:
 		say("You walk away from the cart")
 	if Controls.pressed("close"):
 		trading = null
+		board = null
 		bag_open = false
 		cart_open = false
 	if Controls.pressed("swap"):
@@ -367,6 +379,7 @@ func _process(delta: float) -> void:
 	blocking = shield() != null and Controls.held("block") and not pointer_over_ui and not out_of_breath
 
 	_mark("input")
+	cart.crates = crates_carried()
 	var near := net.nearest(Vector2(cart.x, cart.y))
 	var on_main_road: bool = near.dist < Road.ROAD_WIDTH / 2 + 4
 	# (A town's plaza is as good as road)
@@ -617,9 +630,9 @@ func add_to_bag(entry: Dictionary) -> bool:
 # Into a town: safe from raiders, and the townsfolk mend the cart, bind your
 # wounds and rest the horse, free of charge.
 func _arrive(place: Dictionary) -> void:
-	var mended := health < MAX_HEALTH or cart_health < MAX_CART_HEALTH
-	health = MAX_HEALTH
-	cart_health = MAX_CART_HEALTH
+	var mended := health < max_health() or cart_health < max_cart_health()
+	health = max_health()
+	cart_health = max_cart_health()
 	stamina = 1.0
 	winded = false
 	breath = 1.0
@@ -635,6 +648,7 @@ func _arrive(place: Dictionary) -> void:
 		say("The folk of %s mend your cart and bind your wounds" % place.name, 1.5)
 	else:
 		say("You rest awhile in %s" % place.name, 1.5)
+	_deliver(place)
 
 
 # --- Day and night -------------------------------------------------------------
@@ -669,8 +683,8 @@ func rest_until_dawn() -> void:
 	was_night = false
 	rest_fade = 1.0
 	war_bands.clear()
-	health = MAX_HEALTH
-	cart_health = MAX_CART_HEALTH
+	health = max_health()
+	cart_health = max_cart_health()
 	stamina = 1.0
 	winded = false
 	breath = 1.0
@@ -790,7 +804,7 @@ func use_bag_item(i: int) -> void:
 			say("Ammunition is used up as you shoot")
 		return
 	if entry.type == "poultice":
-		if health >= MAX_HEALTH:
+		if health >= max_health():
 			say("You are already in good health")
 			return
 		health += 1
@@ -798,10 +812,10 @@ func use_bag_item(i: int) -> void:
 		_drop("heart", me.x, me.y)
 		say("You bind your wounds (+1 ♥)")
 	else:
-		if cart_health >= MAX_CART_HEALTH:
+		if cart_health >= max_cart_health():
 			say("The cart needs no mending")
 			return
-		cart_health = mini(MAX_CART_HEALTH, cart_health + 2)
+		cart_health = mini(max_cart_health(), cart_health + 2)
 		_drop("plank", cart.cart_x, cart.cart_y)
 		say("You patch up the cart (+2)")
 	entry.count -= 1
@@ -892,9 +906,9 @@ func trade_view() -> Variant:
 
 func price_of(offer: Dictionary) -> int:
 	if offer.get("type") == "repair":
-		return offer.price * (MAX_CART_HEALTH - cart_health)
+		return offer.price * (max_cart_health() - cart_health)
 	if offer.get("type") == "heal":
-		return offer.price * (MAX_HEALTH - health)
+		return offer.price * (max_health() - health)
 	return offer.price
 
 
@@ -902,9 +916,9 @@ func price_of(offer: Dictionary) -> int:
 func cannot_buy(offer: Dictionary, price: int) -> String:
 	if offer.get("sold", false):
 		return "Sold"
-	if offer.get("type") == "repair" and cart_health >= MAX_CART_HEALTH:
+	if offer.get("type") == "repair" and cart_health >= max_cart_health():
 		return "Cart is sound"
-	if offer.get("type") == "heal" and health >= MAX_HEALTH:
+	if offer.get("type") == "heal" and health >= max_health():
 		return "Already hale"
 	if price > gold:
 		return "Not enough gold"
@@ -935,10 +949,10 @@ func buy(i: int) -> void:
 			stash(bag, offer.type, offer.get("qty", 1))
 		say("Bought %s %s" % [how_many, Items.CONSUMABLES[offer.type].name])
 	elif offer.type == "repair":
-		cart_health = MAX_CART_HEALTH
+		cart_health = max_cart_health()
 		say("The wheelwright sets your cart to rights")
 	elif offer.type == "heal":
-		health = MAX_HEALTH
+		health = max_health()
 		say("The healer binds your wounds")
 
 
@@ -1116,13 +1130,18 @@ func _update_throwing(dt: float, from: Dictionary) -> void:
 		say("Out of %s%s!" % [Items.AMMO[weapon.ammo].name.to_lower(), " in your bag" if on_foot else ""])
 	if in_hand and down and throw_cooldown <= 0 and loaded:
 		missiles.throw(Vector2(from.x, from.y), target, Vector2(from.vx, from.vy), weapon)
+		if perks.has("volley"):
+			# Two more, either side
+			var origin := Vector2(from.x, from.y)
+			for spread in [-0.13, 0.13]:
+				missiles.throw(origin, origin + (target - origin).rotated(spread), Vector2(from.vx, from.vy), weapon)
 		Sfx.play(SHOT_SOUNDS.get(weapon.shot, "sling"), Vector2(from.x, from.y))
 		_take_ammo(weapon.ammo)
 		if on_foot:
 			peasant.fire()
 		else:
 			cart.fire()
-		throw_cooldown = weapon.cooldown
+		throw_cooldown = weapon.cooldown * (0.8 if perks.has("quick") else 1.0)
 	# Dotted aim line out to the throwing range, only while the mouse is over
 	# the game (otherwise there's nothing to aim at)
 	_aim_state = {"from": Vector2(from.x, from.y), "to": target, "range": weapon.range, "loaded": loaded} if in_hand and pointer_inside else {}
@@ -1348,7 +1367,7 @@ func hurt(dmg: int, faction: String, arrow: bool, from := Vector2.INF) -> void:
 	# A raised shield turns aside what comes from where you're facing, for a
 	# little breath (on the cart too: the driver shields the cart)
 	if blocking and from != Vector2.INF and _shield_covers(from):
-		breath = maxf(0.0, breath - shield().cost)
+		breath = maxf(0.0, breath - shield().cost * _lungs())
 		breath_rest = 0.0
 		if breath <= 0:
 			out_of_breath = true
@@ -1378,6 +1397,8 @@ func hurt(dmg: int, faction: String, arrow: bool, from := Vector2.INF) -> void:
 			end("Robbed by bandits", "the bandits cut you down by the road")
 	else:
 		cart_health = maxi(0, cart_health - dmg)
+		if crates_carried() > 0 and randf() < CRATE_SMASH:
+			_smash_crate()
 		if cart_health <= 0:
 			if goblins:
 				end("Cart torn apart", "the goblins hacked your cart to kindling")
@@ -1448,6 +1469,18 @@ func _interaction() -> Variant:
 		return {"label": "E – Take arrows from the barrel", "x": best_loot.x, "y": best_loot.y, "act": func() -> void: raid_barrel(best_loot)}
 	if best_loot:
 		return {"label": "E – Open the treasure chest", "x": best_loot.x, "y": best_loot.y, "act": func() -> void: search(best_loot)}
+	if town != null:
+		var enc: Variant = encounters.town_encounter(town.id)
+		if enc != null:
+			for role in enc.staff:
+				var spot: Dictionary = enc.staff[role]
+				if Vector2(spot.x, spot.y).distance_to(p) < TRADE_REACH:
+					var open: bool = board != null and board.kind == role
+					var label: String = "E – Close" if open else BOARD_PROMPTS[role]
+					var town_id: int = town.id
+					return {"label": label, "x": spot.x, "y": spot.y, "act": func() -> void:
+						board = null if open else {"kind": role, "town": town_id}
+						trading = null}
 	for h in encounters.hirelings():
 		if Vector2(h.x, h.y).distance_to(p) < TRADE_REACH:
 			var offer: String = "Take on %s the %s" % [h.who, h.kind] if h.price == 0 else "Hire %s the %s for %d gold" % [h.who, h.kind, h.price]
@@ -1470,10 +1503,181 @@ func _interaction() -> Variant:
 	return null
 
 
+# --- Supplies, carts and honour ---------------------------------------------------------
+
+const CRATE_SMASH := 0.25 # chance a blow on the cart smashes a crate
+const BOARD_PROMPTS := {"quartermaster": "E – Supply runs", "wainwright": "E – See the wainwright (carts)", "captain": "E – Speak to the gate captain (honour)"}
+
+
+func max_health() -> int:
+	return MAX_HEALTH + perks.get("tough", 0)
+
+
+func max_cart_health() -> int:
+	return cart_spec().health + (4 if perks.has("wheels") else 0)
+
+
+func cart_spec() -> Dictionary:
+	return Carts.LIST[cart_tier]
+
+
+func crates_carried() -> int:
+	var n := 0
+	for m in missions:
+		n += m.crates
+	return n
+
+
+func crate_room() -> int:
+	return cart_spec().crates - crates_carried()
+
+
+# Breath spent is this much of what it would be (Deep lungs).
+func _lungs() -> float:
+	return 0.67 if perks.has("lungs") else 1.0
+
+
+# A raider's blow lands on the cart and smashes a crate: a run is short one,
+# and if that was its last, it's failed.
+func _smash_crate() -> void:
+	var loaded := missions.filter(func(m: Dictionary) -> bool: return m.crates > 0)
+	var m: Dictionary = loaded[randi() % loaded.size()]
+	m.crates -= 1
+	Sfx.play("block", Vector2(cart.cart_x, cart.cart_y), 2.0)
+	_splinters(Vector2(cart.cart_x, cart.cart_y))
+	if m.crates <= 0:
+		missions.erase(m)
+		say("The last crate for %s is smashed – that run is lost" % m.to_name, 1.0)
+	else:
+		say("A crate for %s is smashed! (%d left)" % [m.to_name, m.crates])
+
+
+# Wood flying off the cart.
+func _splinters(at: Vector2) -> void:
+	for n in 10:
+		var a := randf() * TAU
+		var g := Sketch.new()
+		g.line(Vector2.ZERO, Vector2.from_angle(randf() * TAU) * randf_range(3, 6), 1.5, Color("#8b6236"))
+		g.position = at + Vector2(0, -12)
+		fx.add_child(g)
+		var tween := g.create_tween()
+		tween.tween_property(g, "position", g.position + Vector2.from_angle(a) * randf_range(20, 50) + Vector2(0, 10), 0.5)
+		tween.parallel().tween_property(g, "modulate:a", 0.0, 0.8)
+		tween.tween_callback(g.queue_free)
+
+
+# Arriving in a town: hand over whatever supplies were for it.
+func _deliver(place: Dictionary) -> void:
+	for m in missions.duplicate():
+		if m.to_id != place.id:
+			continue
+		missions.erase(m)
+		var share: float = float(m.crates) / m.start
+		var paid := roundi(m.gold * share)
+		var earned := maxi(1, roundi(m.honour * share))
+		gold += paid
+		honour += earned
+		scatter("coin", mini(paid, 12), cart.cart_x, cart.cart_y)
+		var note := ("the crate" if m.start == 1 else "all %d crates" % m.start) if m.crates == m.start else "%d of %d crates" % [m.crates, m.start]
+		say("Supplies delivered to %s – %s: +%d gold, +%d honour" % [place.name, note, paid, earned], 2.5)
+
+
+# What the board you're reading shows (see BoardPanel), or null.
+func board_view() -> Variant:
+	if board == null:
+		return null
+	if not on_foot or town == null or town.id != board.town:
+		board = null
+		return null
+	var here: Dictionary = net.towns[board.town]
+	var purse := "● %d   ✦ %d" % [gold, honour]
+	var rows := []
+	match board.kind:
+		"quartermaster":
+			if not here.has("offers"):
+				here.offers = Missions.offers_for(here, net)
+			for o in here.offers:
+				var dest: Dictionary = net.towns[o.to_id]
+				var metres := roundi(here.pos.distance_to(dest.pos) / PX_PER_METRE)
+				var why := ""
+				if not o.taken and crate_room() < o.crates:
+					why = "Not enough room in the cart (%d free)" % maxi(0, crate_room())
+				rows.append({"name": "%d %s to %s" % [o.crates, "crate" if o.crates == 1 else "crates", o.to_name],
+					"detail": "%d m %s%s · ● %d gold · ✦ %d honour" % [metres, Missions.compass(here.pos, dest.pos),
+						" (off the road north)" if dest.side != "c" else "", o.gold, o.honour],
+					"button": "Taken" if o.taken else "Take", "why": why, "done": o.taken})
+			return {"title": "%s quartermaster" % here.name, "purse": purse, "rows": rows,
+				"note": "Cart: %d of %d crates loaded. Paid on arrival for every crate that gets there; blows on the cart can smash them." % [crates_carried(), cart_spec().crates]}
+		"wainwright":
+			for k in Carts.LIST.size():
+				var cart_: Dictionary = Carts.LIST[k]
+				var why := ""
+				if k <= cart_tier:
+					why = ""
+				elif cart_.get("rare", false) and here.side == "c":
+					why = "Only built in the towns off the road north"
+				elif gold < cart_.price:
+					why = "Not enough gold"
+				rows.append({"name": cart_.name, "detail": Carts.describe(cart_), "button": "Yours" if k == cart_tier else ("—" if k < cart_tier else "● %d" % cart_.price),
+					"why": why, "done": k <= cart_tier})
+			return {"title": "%s wainwright" % here.name, "purse": purse, "rows": rows,
+				"note": "A bigger cart carries more supplies and seats more hands. Your old one goes in part exchange."}
+		"captain":
+			for perk in Perks.LIST:
+				var have: int = perks.get(perk.id, 0)
+				var most: int = perk.get("max", 1)
+				var why := ""
+				if have < most and honour < perk.cost:
+					why = "Not enough honour"
+				rows.append({"name": perk.name + (" (%d/%d)" % [have, most] if most > 1 else ""), "detail": perk.desc,
+					"button": "Yours" if have >= most else "✦ %d" % perk.cost, "why": why, "done": have >= most})
+			return {"title": "Captain of the %s gate" % here.name, "purse": purse, "rows": rows,
+				"note": "Honour, earned carrying supplies between the towns, buys what the garrison can teach you. It lasts the rest of the road."}
+	return null
+
+
+func board_act(i: int) -> void:
+	if board == null:
+		return
+	var here: Dictionary = net.towns[board.town]
+	match board.kind:
+		"quartermaster":
+			var o: Dictionary = here.offers[i]
+			if o.taken or crate_room() < o.crates:
+				return
+			o.taken = true
+			missions.append({"to_id": o.to_id, "to_name": o.to_name, "from_name": o.from_name, "crates": o.crates,
+				"start": o.crates, "gold": o.gold, "honour": o.honour})
+			Sfx.play("thunk")
+			say("%d %s loaded for %s" % [o.crates, "crate" if o.crates == 1 else "crates", o.to_name])
+		"wainwright":
+			var cart_: Dictionary = Carts.LIST[i]
+			if i <= cart_tier or gold < cart_.price or (cart_.get("rare", false) and here.side == "c"):
+				return
+			gold -= cart_.price
+			cart_tier = i
+			cart.set_size(cart_.size)
+			cart_health = max_cart_health()
+			Sfx.play("coin")
+			say("You drive off in a %s" % cart_.name.to_lower(), 1.5)
+		"captain":
+			var perk: Dictionary = Perks.LIST[i]
+			if perks.get(perk.id, 0) >= perk.get("max", 1) or honour < perk.cost:
+				return
+			honour -= perk.cost
+			perks[perk.id] = perks.get(perk.id, 0) + 1
+			if perk.id == "tough":
+				health = max_health()
+			if perk.id == "wheels":
+				cart_health = max_cart_health()
+			Sfx.play("coin")
+			say("%s – %s" % [perk.name, perk.desc.to_lower()], 1.5)
+
+
 # Take on a hireling: they leave their spot and ride in the back of the cart.
 func hire(h: Dictionary) -> void:
-	if companions.size() >= HorseCart.SEATS.size():
-		say("There's no room left on the cart")
+	if companions.size() >= cart_spec().seats:
+		say("There's no room left on the cart – a bigger one from a wainwright would seat more")
 		return
 	if gold < h.price:
 		say("%s wants %d gold – you have %d" % [h.who, h.price, gold])
@@ -1524,14 +1728,14 @@ func _update_breath(dt: float, keys: Dictionary) -> bool:
 	var moving: bool = keys.up or keys.down or keys.left or keys.right
 	var spent := false
 	if on_foot and not blocking and Controls.pressed("dash") and dash_cooldown <= 0 and not peasant.dashing():
-		if breath >= DASH_COST:
+		if breath >= DASH_COST * _lungs():
 			# Along the keys held, or towards the mouse if standing still
 			var toward := pointer_world() - peasant.position
 			var dx: float = (int(keys.right) - int(keys.left)) if moving else toward.x
 			var dy: float = (int(keys.down) - int(keys.up)) if moving else toward.y
-			peasant.dash(dx, dy)
-			breath -= DASH_COST
-			dash_cooldown = DASH_COOLDOWN
+			peasant.dash(dx, dy, 1.33 if perks.has("nimble") else 1.0)
+			breath -= DASH_COST * _lungs()
+			dash_cooldown = DASH_COOLDOWN * (0.6 if perks.has("nimble") else 1.0)
 			dash_guard = Peasant.DASH_TIME + 0.05
 			spent = true
 			for k in 4:
@@ -1540,7 +1744,7 @@ func _update_breath(dt: float, keys: Dictionary) -> bool:
 			say("Too out of breath to dash")
 	var sprint: bool = on_foot and not blocking and Controls.held("boost") and moving and not out_of_breath and breath > 0
 	if sprint:
-		breath = maxf(0.0, breath - SPRINT_DRAIN * dt)
+		breath = maxf(0.0, breath - SPRINT_DRAIN * _lungs() * dt)
 		spent = true
 	if spent:
 		breath_rest = 0.0
@@ -1609,7 +1813,7 @@ func _draw_marker(ci: CanvasItem) -> void:
 func _update_stamina(dt: float, keys: Dictionary) -> bool:
 	var gallop: bool = Controls.held("boost") and not on_foot and not winded and keys.up and cart.speed > 20
 	if gallop:
-		stamina = maxf(0.0, stamina - STAMINA_DRAIN * dt)
+		stamina = maxf(0.0, stamina - STAMINA_DRAIN * (0.67 if perks.has("horse") else 1.0) * dt)
 		stamina_rest = 0.0
 		if stamina == 0.0:
 			winded = true

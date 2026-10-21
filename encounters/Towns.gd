@@ -45,6 +45,31 @@ static func banner(h := 64.0, torn := true) -> Sketch:
 	return g
 
 
+# A little board on a post, lettered.
+static func _sign_post(b: Build, at: Vector2, text: String) -> void:
+	var post := Sketch.new()
+	post.ellipse(Vector2.ZERO, 4, 2, Color(0, 0, 0, 0.25))
+	post.line(Vector2.ZERO, Vector2(0, -26), 2.5, Color("#5e3f22"))
+	var w := text.length() * 5.6 + 10
+	var plate := Sketch.round_rect_points(-w / 2, -38, w, 13, 2)
+	post.poly(plate, Color("#a8875c")).poly_stroke(plate, 1.5, Color("#3d2f25"))
+	post.add_child(Fonts.world_label(text, Vector2(0, -31.5), 10, Color("#2a1f14")))
+	b.stand(post, at.x, at.y)
+
+
+# A spare cart wheel leaning up (the wainwright's sign of trade).
+static func _wheel() -> Sketch:
+	var g := Sketch.new()
+	g.ellipse(Vector2(3, 1), 10, 3, Color(0, 0, 0, 0.25))
+	var hub := Vector2(0, -11)
+	g.ellipse_stroke(hub, 9, 11, 2.5, Color("#5e3f22"))
+	for k in 6:
+		var a := k * TAU / 6
+		g.line(hub, hub + Vector2(cos(a) * 9, sin(a) * 11), 1.5, Color("#8b6236"))
+	g.circle(hub, 2.2, Color("#3c424d"))
+	return g
+
+
 # Angles round the middle that aren't in front of a gate, `count` of them
 # spread evenly (as near as the gates allow), starting from `offset`.
 static func _free_angles(gates: Array, count: int, offset: float, gap := GATE_GAP) -> Array:
@@ -193,7 +218,7 @@ static func build(b: Build, town: Dictionary) -> Dictionary:
 		stock.smith.append({"kind": "gear", "item": Items.roll_item(metres + (900.0 if rich else 0.0)), "price": 0})
 	for offer in stock.smith:
 		offer.price = offer.item.tier * 10 + randi_range(0, 4)
-	var inner := _free_angles(gates, 6, ring[0] + PI if not ring.is_empty() else 0.0, 0.5)
+	var inner := _free_angles(gates, 8, ring[0] + PI if not ring.is_empty() else 0.0, 0.45)
 	var traders := []
 	var stalls := [["Blacksmith", stock.smith, Color("#7d8590"), "smith"], ["General store", stock.store, Color("#c0392b"), "merchant"]]
 	for k in mini(stalls.size(), inner.size()):
@@ -212,6 +237,40 @@ static func build(b: Build, town: Dictionary) -> Dictionary:
 	var flag: Vector2 = at_angle.call(spots[1] if spots.size() > 1 else PI, INNER + 30)
 	b.stand(banner(84, false), flag.x, flag.y)
 	Loot.add_prop(b, "barrel", well_at + Vector2(24, 8), 8)
+
+	# The quartermaster, with crates to go out (see Missions); the wainwright,
+	# who builds bigger carts (see Carts); and at the gate north, the captain
+	# who rewards honour (see Perks)
+	var staff := {}
+	var roles := [["quartermaster", "Supplies"], ["wainwright", "Wainwright"]]
+	if final:
+		roles.append(["captain", "Gate captain"])
+	for k in roles.size():
+		var a: float = spots[2 + k] if spots.size() > 2 + k else randf() * TAU
+		var at: Vector2 = at_angle.call(a, INNER + 4)
+		var to_plaza := (c - at).angle()
+		var who: Folk
+		match roles[k][0]:
+			"quartermaster":
+				who = Folk.new(Folk.look("merchant"), at.x, at.y, to_plaza)
+				for n in 3:
+					var crate_at := at + Vector2.from_angle(a).rotated(PI / 2) * (22 + n * 14) + Vector2.from_angle(a) * 10
+					b.stand(Structures.crate(13), crate_at.x, crate_at.y)
+					solids.append(Vector3(crate_at.x, crate_at.y, 9))
+			"wainwright":
+				who = Folk.new(Folk.look("smith"), at.x, at.y, to_plaza)
+				var wheel_at := at + Vector2.from_angle(a).rotated(-PI / 2) * 24
+				b.stand(_wheel(), wheel_at.x, wheel_at.y)
+			"captain":
+				who = Folk.spearman(at.x, at.y, to_plaza)
+				var pole := at + Vector2.from_angle(a).rotated(PI / 2) * 22
+				b.stand(banner(76, false), pole.x, pole.y)
+		b.stand(who, at.x, at.y)
+		folk.append(who)
+		solids.append(Vector3(at.x, at.y, 8))
+		var sign_at := at + Vector2.from_angle(a) * 26 + Vector2.from_angle(a).rotated(-PI / 2) * 26
+		_sign_post(b, sign_at, roles[k][1])
+		staff[roles[k][0]] = {"x": at.x, "y": at.y}
 
 	# Someone by the inn looking for work: an archer who'll ride with you and
 	# defend the cart. The very first town's comes along for nothing; later
@@ -252,6 +311,7 @@ static func build(b: Build, town: Dictionary) -> Dictionary:
 		"traders": traders,
 		"hirelings": hirelings,
 		"guards": guards,
+		"staff": staff,
 		"zones": [Vector3(c.x, c.y, RADIUS + 20)],
 		"trigger": Vector3(c.x, c.y, 0),
 		"animate": animate,

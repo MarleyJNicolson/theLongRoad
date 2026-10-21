@@ -110,12 +110,12 @@ func fire() -> void:
 
 
 # A quick burst along (dx, dy); steering is ignored until it's over.
-func dash(dx: float, dy: float) -> void:
+func dash(dx: float, dy: float, reach := 1.0) -> void:
 	var d := Vector2(dx, dy)
 	d = d.normalized() if d != Vector2.ZERO else Vector2.ZERO
 	vx = d.x * DASH_SPEED
 	vy = d.y * DASH_SPEED
-	dash_t = DASH_TIME
+	dash_t = DASH_TIME * reach
 
 
 func dashing() -> bool:
