@@ -12,6 +12,7 @@ extends Node
 # to a whole number of art pixels so the grid never sits half a pixel out
 # (which once showed as a diagonal seam).
 
+
 const WORLD_SCENE := preload("res://world/World.tscn")
 const PIXEL_SHADER := preload("res://fx/pixel_art.gdshader")
 
